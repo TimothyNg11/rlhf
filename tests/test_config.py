@@ -22,6 +22,15 @@ def test_load_base_config_no_inherit():
     assert cfg["run_name"] == "base"
     assert cfg["model"]["name"] == "Qwen/Qwen2.5-0.5B-Instruct"
     assert cfg["train"]["lr"] == 2.0e-6
+    assert cfg["train"]["micro_batch_size"] == 8
+    assert cfg["train"]["format_bonus"] == 0.2
+    assert cfg["train"]["max_grad_norm"] == 1.0
+    assert cfg["train"]["save_every"] == 80
+    assert cfg["rollout"]["gpu_memory_utilization"] == 0.6
+    assert cfg["eval_during_training"]["temperature"] == 0.6
+    assert cfg["eval_during_training"]["top_p"] == 0.95
+    assert cfg["eval_during_training"]["max_tokens"] == 3072
+    assert cfg["eval_during_training"]["seed"] == 0
 
 
 def test_inherit_merges_scalars_and_overrides(tmp_path):

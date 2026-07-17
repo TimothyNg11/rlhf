@@ -55,13 +55,21 @@ def compute_reward(
     *,
     truncated: bool,
     truncation_mode: str = "zero_reward",
+    format_bonus: float = 0.0,
 ) -> RewardResult:
-    """Binary reward: 1.0 iff a boxed answer is extracted from ``completion`` AND
-    verifies against ``gold``, else 0.0.
+    """Reward: 1.0 iff a boxed answer is extracted from ``completion`` AND verifies
+    against ``gold``. Otherwise, if a boxed answer was extracted but is wrong,
+    reward is ``format_bonus`` (does NOT stack on top of the 1.0 for correct
+    answers). If nothing was extracted, reward is 0.0.
 
     If ``truncated``: mode ``"zero_reward"`` forces reward 0.0 (masked False);
     mode ``"mask"`` forces reward 0.0 and masked True (the trainer excludes
-    masked samples from the loss). Unknown modes raise ``ValueError``.
+    masked samples from the loss). A truncated completion never gets the format
+    bonus, even if it looks parseable/correct. Unknown modes raise ``ValueError``.
+
+    ``format_bonus`` defaults to 0.0, which preserves the exact binary
+    1.0/0.0 behavior of earlier versions of this function -- the eval runner
+    never passes it, so its pass@1 semantics are unaffected.
     """
     if truncation_mode not in _VALID_TRUNCATION_MODES:
         raise ValueError(
@@ -72,10 +80,16 @@ def compute_reward(
     extracted = extract_boxed(completion)
     parseable = extracted is not None
     correct = parseable and verify_answer(extracted, gold)
-    reward = 1.0 if correct else 0.0
 
     if truncated:
         masked = truncation_mode == "mask"
         return RewardResult(reward=0.0, parseable=parseable, masked=masked)
+
+    if correct:
+        reward = 1.0
+    elif parseable:
+        reward = format_bonus
+    else:
+        reward = 0.0
 
     return RewardResult(reward=reward, parseable=parseable, masked=False)

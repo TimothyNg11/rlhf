@@ -103,3 +103,51 @@ def test_reward_result_is_frozen():
     result = compute_reward(r"\boxed{42}", "42", truncated=False)
     with pytest.raises(Exception):
         result.reward = 5.0  # type: ignore[misc]
+
+
+# --- compute_reward: format_bonus semantics ---
+
+
+def test_format_bonus_parseable_wrong_gets_bonus():
+    result = compute_reward(r"\boxed{41}", "42", truncated=False, format_bonus=0.2)
+    assert result.reward == pytest.approx(0.2)
+    assert result.parseable is True
+    assert result.masked is False
+
+
+def test_format_bonus_correct_still_one():
+    # The bonus does not stack on top of a correct answer's reward.
+    result = compute_reward(r"\boxed{42}", "42", truncated=False, format_bonus=0.2)
+    assert result.reward == 1.0
+    assert result.parseable is True
+    assert result.masked is False
+
+
+def test_format_bonus_unparseable_zero():
+    result = compute_reward("I have no boxed answer", "42", truncated=False, format_bonus=0.2)
+    assert result.reward == 0.0
+    assert result.parseable is False
+    assert result.masked is False
+
+
+def test_format_bonus_truncated_zero():
+    # A truncated completion never gets the bonus, in either truncation mode.
+    zero_reward = compute_reward(
+        r"\boxed{41}", "42", truncated=True, truncation_mode="zero_reward", format_bonus=0.2
+    )
+    assert zero_reward.reward == 0.0
+    assert zero_reward.masked is False
+
+    mask = compute_reward(
+        r"\boxed{41}", "42", truncated=True, truncation_mode="mask", format_bonus=0.2
+    )
+    assert mask.reward == 0.0
+    assert mask.masked is True
+
+
+def test_format_bonus_default_zero_backward_compat():
+    # Omitting format_bonus preserves the exact pre-bonus binary behavior.
+    result = compute_reward(r"\boxed{41}", "42", truncated=False)
+    assert result.reward == 0.0
+    assert result.parseable is True
+    assert result.masked is False

@@ -7,6 +7,7 @@ import pytest
 from grpo_math.eval.benchmarks import (
     ANSWER_INSTRUCTION,
     BENCHMARKS,
+    BenchmarkSpec,
     EvalProblem,
     load_benchmark,
     register_local_benchmark,
@@ -96,3 +97,31 @@ def test_import_does_not_require_datasets_or_vllm():
     # module-level import must never require `datasets` (gpu extra); this test
     # is meaningful because `datasets` is genuinely absent from this venv.
     import grpo_math.eval.benchmarks  # noqa: F401
+
+
+# --- take_last + gsm8k_dev ------------------------------------------------
+
+
+def test_gsm8k_dev_registered_with_take_last():
+    # No dataset download here: just checking the registry entry's declared spec.
+    spec = BENCHMARKS["gsm8k_dev"]
+    assert spec.source == "hf"
+    assert spec.kind == "gsm8k"
+    assert spec.split == "train"
+    assert spec.take_last == 500
+
+
+@pytest.fixture
+def _register_tiny_math_take_last():
+    BENCHMARKS["tiny_math_take_last"] = BenchmarkSpec(
+        source="local", path=FIXTURES_DIR / "tiny_math.jsonl", take_last=2
+    )
+    yield
+    BENCHMARKS.pop("tiny_math_take_last", None)
+
+
+def test_take_last_slices_local_benchmark(_register_tiny_math_take_last):
+    full = load_benchmark("tiny_math")
+    limited = load_benchmark("tiny_math_take_last")
+    assert len(limited) == 2
+    assert [p.problem_id for p in limited] == [p.problem_id for p in full[-2:]]

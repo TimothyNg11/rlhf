@@ -19,6 +19,10 @@ train:
   truncation_mode: zero_reward
   grad_checkpointing: true
   seed: 0
+  micro_batch_size: 8
+  format_bonus: 0.2
+  max_grad_norm: 1.0
+  save_every: 80
 rollout:
   group_size: 4
   # 0.6 (the 1.5B recipe value) is too cold for exploration at 0.5B; deviation
@@ -27,6 +31,7 @@ rollout:
   top_p: 1.0
   max_prompt_tokens: 512
   max_response_tokens: 3072
+  gpu_memory_utilization: 0.6
 data:
   dataset: openai/gsm8k
   # Last 500 train problems held out as dev: drives in-loop eval + early stopping.
@@ -37,3 +42,7 @@ eval_during_training:
   every_steps: 25
   benchmarks: [gsm8k_dev]
   k: {gsm8k_dev: 2}
+  temperature: 0.6
+  top_p: 0.95
+  max_tokens: 3072
+  seed: 0

@@ -1,0 +1,3 @@
+inherit: base.yaml
+run_name: g1
+max_steps: 100

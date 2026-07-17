@@ -71,6 +71,7 @@ class BenchmarkSpec:
     prompt_field: str | None = None  # hf: source column -> EvalProblem.prompt
     answer_field: str | None = None  # hf: source column -> EvalProblem.gold
     path: Path | None = None  # local: jsonl file path
+    take_last: int | None = None  # keep only the last N loaded problems (applied before `limit`)
 
 
 BENCHMARKS: dict[str, BenchmarkSpec] = {
@@ -103,6 +104,19 @@ BENCHMARKS: dict[str, BenchmarkSpec] = {
         split="test",
         prompt_field="question",
         answer_field="answer",
+    ),
+    "gsm8k_dev": BenchmarkSpec(
+        # Same source as "gsm8k" but the train split's last 500 problems, held
+        # out as a dev set for in-loop eval (see grpo_math.data.gsm8k, which
+        # holds out the same tail-slice of the same split for training data).
+        source="hf",
+        kind="gsm8k",
+        dataset_id="openai/gsm8k",
+        hf_config="main",
+        split="train",
+        prompt_field="question",
+        answer_field="answer",
+        take_last=500,
     ),
     "amc23": BenchmarkSpec(
         source="hf",
@@ -217,8 +231,9 @@ def _load_mmlu_stem(name: str, spec: BenchmarkSpec) -> list[EvalProblem]:
 
 
 def load_benchmark(name: str, *, limit: int | None = None) -> list[EvalProblem]:
-    """Load the ordered problem set for benchmark ``name``. ``limit`` truncates
-    the list AFTER deterministic ordering (for smoke runs)."""
+    """Load the ordered problem set for benchmark ``name``. If set, ``spec.take_last``
+    keeps only the last N problems (applied right after loading, for any source
+    kind); ``limit`` then truncates the list AFTER that (for smoke runs)."""
     if name not in BENCHMARKS:
         raise KeyError(f"Unknown benchmark {name!r}; registered: {sorted(BENCHMARKS)}")
 
@@ -231,6 +246,9 @@ def load_benchmark(name: str, *, limit: int | None = None) -> list[EvalProblem]:
         problems = _load_mmlu_stem(name, spec)
     else:
         problems = _load_hf_simple(name, spec)
+
+    if spec.take_last is not None:
+        problems = problems[-spec.take_last :]
 
     if limit is not None:
         problems = problems[:limit]
