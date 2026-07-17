@@ -15,6 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest", "torch", "matplotlib"]
 gpu = ["vllm>=0.8.0", "torch", "transformers", "datasets", "wandb"]
+trl = ["trl"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
