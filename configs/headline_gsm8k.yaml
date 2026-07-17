@@ -1,0 +1,3 @@
+inherit: base.yaml
+run_name: headline_gsm8k
+max_steps: 400

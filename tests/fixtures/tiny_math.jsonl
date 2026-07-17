@@ -1,0 +1,6 @@
+{"problem_id": "tm_1", "prompt_raw": "What is 2 + 2?", "gold": "4", "metadata": {"topic": "arithmetic"}}
+{"problem_id": "tm_2", "prompt_raw": "What is 10 - 3?", "gold": "7", "metadata": {"topic": "arithmetic"}}
+{"problem_id": "tm_3", "prompt_raw": "What is 5 * 6?", "gold": "30", "metadata": {"topic": "arithmetic"}}
+{"problem_id": "tm_4", "prompt_raw": "Simplify 1/2 + 1/4.", "gold": "\\frac{3}{4}", "metadata": {"topic": "fractions"}}
+{"problem_id": "tm_5", "prompt_raw": "What is 7^2?", "gold": "49", "metadata": {"topic": "arithmetic"}}
+{"problem_id": "tm_6", "prompt_raw": "What is the square root of 16?", "gold": "4", "metadata": {"topic": "arithmetic"}}

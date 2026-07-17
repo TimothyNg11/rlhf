@@ -1,0 +1,12 @@
+temperature: 0.6
+top_p: 0.95
+max_tokens: 32768
+# Eval-time generation only (training rollouts stay bf16): ~20-30% faster on
+# H100/H200. Set to "auto" on GPUs without fp8 KV support (e.g. A100).
+kv_cache_dtype: fp8
+k_default: 4
+k_final_aime: 32
+seed: 0
+# aime24/aime25/amc23 stay registered in the benchmark registry and can be run
+# explicitly via --benchmark (optional "scale honesty" rows, ~$2 at 0.5B).
+benchmarks: [gsm8k, math500, mmlu_stem]

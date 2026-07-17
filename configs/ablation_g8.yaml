@@ -1,0 +1,6 @@
+inherit: headline_gsm8k.yaml
+run_name: ablation_g8
+rollout:
+  group_size: 8
+train:
+  prompts_per_step: 32   # 32x8 = 256 completions/step, compute-matched to headline 64x4

@@ -1,0 +1,4 @@
+inherit: headline_gsm8k.yaml
+run_name: ablation_kl_off
+train:
+  kl_coef: 0.0

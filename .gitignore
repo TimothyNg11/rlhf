@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+
+# Project artifacts
+wandb/
+outputs/
+results/
+.superpowers/

@@ -1,0 +1,52 @@
+{"pred": "The answer is $\\boxed{42}$.", "gold": "42", "equivalent": true, "note": "plain positive integer", "category": "integer"}
+{"pred": "So the final answer is \\boxed{0}.", "gold": "0", "equivalent": true, "note": "zero", "category": "integer"}
+{"pred": "Thus $\\boxed{-17}$ is the answer.", "gold": "-17", "equivalent": true, "note": "negative integer", "category": "integer"}
+{"pred": "We get \\boxed{123456}.", "gold": "123456", "equivalent": true, "note": "large integer", "category": "integer"}
+{"pred": "The AIME answer is $\\boxed{025}$.", "gold": "25", "equivalent": true, "note": "AIME leading-zero format vs plain", "category": "aime-format"}
+{"pred": "$\\boxed{007}$", "gold": "7", "equivalent": true, "note": "AIME leading-zero format vs plain, single digit", "category": "aime-format"}
+{"pred": "The answer is \\boxed{-5}.", "gold": "-5", "equivalent": true, "note": "negative number, exact match", "category": "negative"}
+{"pred": "$\\boxed{-3}$", "gold": "3", "equivalent": false, "note": "sign matters, must not match", "category": "negative"}
+{"pred": "$\\boxed{0.5}$", "gold": "\\frac{1}{2}", "equivalent": true, "note": "decimal vs fraction", "category": "fraction-decimal"}
+{"pred": "\\boxed{\\frac{1}{2}}", "gold": "0.5", "equivalent": true, "note": "fraction vs decimal, reversed roles", "category": "fraction-decimal"}
+{"pred": "The probability is $\\boxed{0.25}$.", "gold": "\\frac{1}{4}", "equivalent": true, "note": "decimal vs quarter fraction", "category": "fraction-decimal"}
+{"pred": "\\boxed{\\frac{2}{4}}", "gold": "\\frac{1}{2}", "equivalent": true, "note": "unsimplified fraction vs simplified", "category": "unsimplified-fraction"}
+{"pred": "\\boxed{\\frac{6}{8}}", "gold": "\\frac{3}{4}", "equivalent": true, "note": "unsimplified fraction vs simplified", "category": "unsimplified-fraction"}
+{"pred": "\\boxed{\\dfrac{1}{2}}", "gold": "\\frac{1}{2}", "equivalent": true, "note": "\\dfrac variant", "category": "frac-variant"}
+{"pred": "\\boxed{\\tfrac{3}{4}}", "gold": "\\frac{3}{4}", "equivalent": true, "note": "\\tfrac variant", "category": "frac-variant"}
+{"pred": "\\boxed{\\dfrac{2}{4}}", "gold": "\\tfrac{1}{2}", "equivalent": true, "note": "\\dfrac unsimplified vs \\tfrac simplified", "category": "frac-variant"}
+{"pred": "\\boxed{\\frac{1}{\\frac{1}{2}}}", "gold": "2", "equivalent": true, "note": "nested fraction reduces to 2", "category": "nested-fraction"}
+{"pred": "\\boxed{\\frac{\\frac{1}{2}}{\\frac{1}{4}}}", "gold": "2", "equivalent": true, "note": "nested fraction division", "category": "nested-fraction"}
+{"pred": "\\boxed{\\frac{\\pi}{4}}", "gold": "0.25\\pi", "equivalent": true, "note": "pi fraction vs decimal-pi", "category": "pi-sqrt"}
+{"pred": "\\boxed{2\\sqrt{2}}", "gold": "\\sqrt{8}", "equivalent": true, "note": "simplified surd vs unsimplified", "category": "pi-sqrt"}
+{"pred": "\\boxed{\\sqrt{8}}", "gold": "2\\sqrt{2}", "equivalent": true, "note": "unsimplified surd vs simplified, reversed", "category": "pi-sqrt"}
+{"pred": "The area is $\\boxed{4\\pi}$ square units.", "gold": "4\\pi", "equivalent": true, "note": "identical pi expression", "category": "pi-sqrt"}
+{"pred": "\\boxed{x+1}", "gold": "1+x", "equivalent": true, "note": "addition is commutative", "category": "commutativity"}
+{"pred": "\\boxed{a+b+c}", "gold": "c+b+a", "equivalent": true, "note": "commutativity, three terms", "category": "commutativity"}
+{"pred": "\\boxed{[0, 1)}", "gold": "[0,1)", "equivalent": true, "note": "interval, whitespace difference", "category": "interval"}
+{"pred": "\\boxed{(2, 5]}", "gold": "(2,5]", "equivalent": true, "note": "interval, whitespace difference", "category": "interval"}
+{"pred": "\\boxed{[0,1)}", "gold": "(0,1)", "equivalent": false, "note": "closed-open vs open-open, NOT equivalent", "category": "interval"}
+{"pred": "\\boxed{(0,1)}", "gold": "[0,1]", "equivalent": false, "note": "open vs closed interval, NOT equivalent", "category": "interval"}
+{"pred": "\\boxed{\\{1, 2\\}}", "gold": "\\{2, 1\\}", "equivalent": true, "note": "set order does not matter", "category": "set"}
+{"pred": "\\boxed{\\{3, 1, 2\\}}", "gold": "\\{1, 2, 3\\}", "equivalent": true, "note": "set order does not matter, three elements", "category": "set"}
+{"pred": "\\boxed{(3, 4)}", "gold": "(3,4)", "equivalent": true, "note": "tuple, whitespace difference", "category": "tuple"}
+{"pred": "\\boxed{(1, 2, 3)}", "gold": "(1,2,3)", "equivalent": true, "note": "3-tuple, whitespace difference", "category": "tuple"}
+{"pred": "\\boxed{(4,3)}", "gold": "(3, 4)", "equivalent": false, "note": "coordinate order matters, NOT equivalent", "category": "tuple"}
+{"pred": "\\boxed{45^\\circ}", "gold": "45", "equivalent": true, "note": "degree symbol vs bare number", "category": "degrees"}
+{"pred": "The angle is $\\boxed{90^\\circ}$.", "gold": "90^\\circ", "equivalent": true, "note": "identical degree expression", "category": "degrees"}
+{"pred": "\\boxed{50\\%}", "gold": "\\frac{1}{2}", "equivalent": true, "note": "percentage vs fraction", "category": "percentage"}
+{"pred": "\\boxed{25\\%}", "gold": "0.25", "equivalent": true, "note": "percentage vs decimal", "category": "percentage"}
+{"pred": "\\boxed{1,000}", "gold": "1000", "equivalent": true, "note": "thousands separator vs plain integer", "category": "thousands-sep"}
+{"pred": "\\boxed{12,345}", "gold": "12345", "equivalent": true, "note": "thousands separator, larger number", "category": "thousands-sep"}
+{"pred": "\\boxed{1.5 \\times 10^3}", "gold": "1500", "equivalent": true, "note": "scientific notation vs plain integer", "category": "scientific"}
+{"pred": "\\boxed{3 \\times 10^{-2}}", "gold": "0.03", "equivalent": true, "note": "scientific notation, negative exponent", "category": "scientific"}
+{"pred": "\\boxed{\\text{even}}", "gold": "even", "equivalent": true, "note": "\\text{} wrapped word vs bare word", "category": "text"}
+{"pred": "\\boxed{\\text{Tuesday}}", "gold": "\\text{Tuesday}", "equivalent": true, "note": "identical text answer", "category": "text"}
+{"pred": "First I guess \\boxed{1}, but actually \\boxed{2}.", "gold": "2", "equivalent": true, "note": "two boxed, last is correct", "category": "multi-boxed"}
+{"pred": "\\boxed{1} \\boxed{2} \\boxed{3}", "gold": "3", "equivalent": true, "note": "three boxed, last is correct", "category": "multi-boxed"}
+{"pred": "\\boxed{5} \\boxed{6} \\boxed{7}", "gold": "5", "equivalent": false, "note": "three boxed, last used (7) does not match stale first guess (5)", "category": "multi-boxed"}
+{"pred": "\\boxed{0.5}", "gold": "\\frac{1}{3}", "equivalent": false, "note": "different values, must not match", "category": "not-equal"}
+{"pred": "\\boxed{2\\sqrt{2}}", "gold": "3\\sqrt{2}", "equivalent": false, "note": "different surd coefficient, must not match", "category": "not-equal"}
+{"pred": "\\boxed{7}", "gold": "8", "equivalent": false, "note": "different integers, must not match", "category": "not-equal"}
+{"pred": "\\boxed{\\frac{1}{2}}", "gold": "\\frac{1}{4}", "equivalent": false, "note": "different fractions, must not match", "category": "not-equal"}
+{"pred": "I think the answer is 42 but I forgot to box it.", "gold": "42", "equivalent": false, "note": "no \\boxed{} present, extraction fails", "category": "no-boxed"}
+{"pred": "<think>Let me work through this...</think> The answer is clearly 100.", "gold": "100", "equivalent": false, "note": "no \\boxed{} present, extraction fails", "category": "no-boxed"}

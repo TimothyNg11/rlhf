@@ -1,0 +1,39 @@
+run_name: base
+model:
+  name: Qwen/Qwen2.5-0.5B-Instruct
+  dtype: bfloat16
+train:
+  # 2x the DeepScaleR 1.5B recipe's 1e-6: smaller model, short run (docs/PLAN.md v3)
+  lr: 2.0e-6
+  optimizer: adamw
+  lr_schedule: constant
+  prompts_per_step: 64
+  ppo_mini_batch_size: 32
+  clip_ratio: 0.2
+  kl_coef: 0.001
+  kl_loss_type: low_var_kl
+  entropy_coef: 0.0
+  loss_agg: token_mean
+  advantage: group_norm        # (r - group_mean) / (group_std + 1e-4)
+  skip_zero_variance_groups: true
+  truncation_mode: zero_reward
+  grad_checkpointing: true
+  seed: 0
+rollout:
+  group_size: 4
+  # 0.6 (the 1.5B recipe value) is too cold for exploration at 0.5B; deviation
+  # documented in docs/PLAN.md v3.
+  temperature: 0.9
+  top_p: 1.0
+  max_prompt_tokens: 512
+  max_response_tokens: 3072
+data:
+  dataset: openai/gsm8k
+  # Last 500 train problems held out as dev: drives in-loop eval + early stopping.
+  # GSM8K test is touched only at milestone/final evals.
+  dev_holdout: 500
+  curriculum: random
+eval_during_training:
+  every_steps: 25
+  benchmarks: [gsm8k_dev]
+  k: {gsm8k_dev: 2}
