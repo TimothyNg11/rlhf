@@ -131,6 +131,11 @@ class GRPOTrainer:
             "'zero_reward'; the rewards module also supports 'mask' but this "
             f"trainer does not implement it. got {train_cfg['truncation_mode']!r}"
         )
+        assert train_cfg["skip_zero_variance_groups"] is True, (
+            "this trainer always drops zero-variance groups; "
+            "train.skip_zero_variance_groups == False is not implemented. "
+            f"got {train_cfg['skip_zero_variance_groups']!r}"
+        )
         expected_holdout = BENCHMARKS["gsm8k_dev"].take_last
         assert cfg["data"]["dev_holdout"] == expected_holdout, (
             f"cfg data.dev_holdout ({cfg['data']['dev_holdout']}) must equal "
@@ -152,7 +157,11 @@ class GRPOTrainer:
         if policy is None:
             from grpo_math.trainer.policy import HFPolicy  # lazy: pulls in transformers
 
-            policy = HFPolicy(model_path_override or model_cfg["name"], trainable=True)
+            policy = HFPolicy(
+                model_path_override or model_cfg["name"],
+                trainable=True,
+                grad_checkpointing=train_cfg["grad_checkpointing"],
+            )
         if ref_policy is None:
             from grpo_math.trainer.policy import HFPolicy  # lazy: pulls in transformers
 
@@ -203,28 +212,45 @@ class GRPOTrainer:
         self.optimizer = torch.optim.AdamW(
             policy.model.parameters(), lr=train_cfg["lr"], weight_decay=0.0
         )
-        self.metrics = MetricsLogger(self.run_dir / "metrics.jsonl", resume=resume)
-        if not resume:
+
+        # A `resume=True` request with no checkpoint on disk yet (e.g. the very
+        # first run of a `--resume`-flagged job) must behave exactly like a
+        # fresh run: fresh metrics.jsonl, fresh config_resolved.yaml. Locate the
+        # checkpoint once, up front, so both the MetricsLogger mode and
+        # config_resolved.yaml gating (and _restore below) agree on it.
+        ckpt_dir = find_latest_checkpoint(self.run_dir / "checkpoints") if resume else None
+        resuming = ckpt_dir is not None
+
+        self.metrics = MetricsLogger(self.run_dir / "metrics.jsonl", resume=resuming)
+        if not resuming:
             (self.run_dir / "config_resolved.yaml").write_text(
                 yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8"
             )
 
         # --- resume ----------------------------------------------------------
         self.start_step = 0
-        if resume:
-            self._restore(model_path_override is not None)
+        if resuming:
+            self._restore(ckpt_dir, model_path_override is not None)
 
-    def _restore(self, model_reloaded_externally: bool) -> None:
+    def _restore(self, ckpt_dir: Path, model_reloaded_externally: bool) -> None:
         """Restore optimizer / sampler / RNG (and, for injected policies, model
-        weights) from the latest checkpoint. ``model_reloaded_externally`` is
-        True on the real path where run_train.py already handed the checkpoint's
-        model dir to HFPolicy as ``model_path_override``."""
-        ckpt_dir = find_latest_checkpoint(self.run_dir / "checkpoints")
-        if ckpt_dir is None:
-            return
+        weights) from ``ckpt_dir``. ``model_reloaded_externally`` is True on the
+        real path where run_train.py already handed the checkpoint's model dir
+        to HFPolicy as ``model_path_override``."""
+        model_dir = ckpt_dir / "model"
+        if model_dir.exists() and not model_reloaded_externally:
+            raise RuntimeError(
+                f"checkpoint {ckpt_dir} was saved in save_pretrained format (it "
+                "has a model/ dir) but the policy was not reloaded from it -- "
+                "resuming now would silently keep the policy's original "
+                "(non-resumed) weights while restoring the optimizer/sampler/RNG "
+                "state. Pass the checkpoint's model dir as model_path_override "
+                "(as scripts/run_train.py does) so the policy is reloaded from "
+                "the checkpoint before GRPOTrainer is constructed."
+            )
         trainer_state = load_trainer_state(ckpt_dir)
         self.optimizer.load_state_dict(
-            torch.load(ckpt_dir / "optimizer.pt", weights_only=False)
+            torch.load(ckpt_dir / "optimizer.pt", weights_only=False, map_location="cpu")
         )
         self.sampler.load_state_dict(trainer_state["sampler"])
         rng_state = load_rng_state(ckpt_dir)
@@ -237,7 +263,9 @@ class GRPOTrainer:
         # state_dict if present (else leave the model as-is).
         model_pt = ckpt_dir / "model.pt"
         if not model_reloaded_externally and model_pt.exists():
-            self.policy.model.load_state_dict(torch.load(model_pt, weights_only=False))
+            self.policy.model.load_state_dict(
+                torch.load(model_pt, weights_only=False, map_location="cpu")
+            )
 
     def _training_autocast(self):
         """bf16 autocast context on non-CPU devices, no-op on CPU -- mirrors
@@ -303,7 +331,9 @@ class GRPOTrainer:
             self.rollout.wake()
             do_sync_check = step % self.sync_check_every == 0
             sent = self.policy.checksums() if do_sync_check else None
-            received = self.rollout.sync_weights(self.policy.sync_iterator())
+            received = self.rollout.sync_weights(
+                self.policy.sync_iterator(), want_checksums=do_sync_check
+            )
             if do_sync_check:
                 assert sent == received, (
                     f"weight-sync checksum handshake failed at step {step}: "

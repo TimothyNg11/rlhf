@@ -3,6 +3,7 @@ on CPU with injected fakes (TinyPolicy + FakeRollout), plus a golden unit test
 for pack_response_values.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -80,6 +81,7 @@ class FakeRollout:
         self.wake_calls = 0
         self.sleep_calls = 0
         self.sync_calls = 0
+        self.want_checksums_calls = []  # want_checksums as seen on each sync_weights call
 
     def generate(self, prompts, *, group_size, temperature, top_p, max_tokens, seed):
         groups = []
@@ -109,8 +111,11 @@ class FakeRollout:
     def sleep(self):
         self.sleep_calls += 1
 
-    def sync_weights(self, weights):
+    def sync_weights(self, weights, *, want_checksums=True):
         self.sync_calls += 1
+        self.want_checksums_calls.append(want_checksums)
+        if not want_checksums:
+            return {}
         received = {name: tensor_checksum(t) for name, t in weights}
         if self.corrupt_checksums:
             received = {name: "0" * 64 for name in received}
@@ -367,3 +372,53 @@ def test_handshake_mismatch_raises(tmp_path):
     )
     with pytest.raises(AssertionError):
         trainer.train()
+
+
+def test_off_cadence_steps_skip_checksum_computation(tmp_path):
+    # sync_check_every defaults to 25, well above max_steps (3), so only step
+    # 0 is a checksum-check step; steps 1 and 2 must ask for (and get) an
+    # empty checksum dict rather than hashing the full weight set.
+    trainer, rollout = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers())
+    )
+    trainer.train()
+
+    assert rollout.want_checksums_calls == [True, False, False]
+
+
+def test_resume_without_checkpoint_starts_fresh(tmp_path):
+    # resume=True on an empty run_dir (no checkpoints written yet) must behave
+    # exactly like a fresh run: no double-counted/duplicated metrics rows, and
+    # config_resolved.yaml still gets written.
+    cfg = _make_cfg()
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg, resume=True
+    )
+    trainer.train()
+
+    rows = _train_rows(tmp_path)
+    assert [r["step"] for r in rows] == [1, 2, 3]
+    assert (tmp_path / "config_resolved.yaml").exists()
+
+
+def test_resume_hf_format_without_override_raises(tmp_path):
+    # A save_pretrained-format checkpoint (a model/ dir) plus resume=True but
+    # no model_path_override must raise loudly rather than silently resuming
+    # the optimizer/sampler/RNG state against stale (non-resumed) weights.
+    ckpt_dir = tmp_path / "checkpoints" / "step_0001"
+    (ckpt_dir / "model").mkdir(parents=True)
+    (ckpt_dir / "trainer_state.json").write_text(
+        json.dumps({"step": 1, "sampler": {"epoch": 0, "batch_idx": 1}, "run_name": "x"})
+    )
+
+    tiny_model = nn.Linear(2, 2)
+    tiny_optimizer = torch.optim.AdamW(tiny_model.parameters(), lr=0.1)
+    tiny_optimizer.zero_grad()
+    tiny_model(torch.randn(1, 2)).sum().backward()
+    tiny_optimizer.step()
+    torch.save(tiny_optimizer.state_dict(), ckpt_dir / "optimizer.pt")
+
+    with pytest.raises(RuntimeError, match="model_path_override"):
+        _make_trainer(
+            tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), resume=True
+        )

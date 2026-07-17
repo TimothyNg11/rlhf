@@ -135,6 +135,15 @@ BENCHMARKS: dict[str, BenchmarkSpec] = {
 }
 
 
+def gsm8k_gold(answer: str) -> str:
+    """Extract the final numeric answer from a raw GSM8K ``answer`` field:
+    the text after the last ``"#### "``, stripped and with thousand
+    separators removed. Shared by :func:`_load_gsm8k` (this module) and
+    :func:`grpo_math.data.gsm8k.load_gsm8k_train` so both extract the same
+    gold string from the same underlying dataset rows."""
+    return answer.split("#### ")[-1].strip().replace(",", "")
+
+
 def register_local_benchmark(name: str, path: str | Path) -> None:
     """Register a ``local`` JSONL benchmark under ``name`` in the module-level registry.
 
@@ -192,7 +201,7 @@ def _load_gsm8k(name: str, spec: BenchmarkSpec) -> list[EvalProblem]:
     ds = _load_hf_dataset(spec)
     problems = []
     for i, row in enumerate(ds):
-        gold = str(row[spec.answer_field]).split("#### ")[-1].strip().replace(",", "")
+        gold = gsm8k_gold(str(row[spec.answer_field]))
         problems.append(
             EvalProblem(
                 problem_id=f"{name}_{i}",

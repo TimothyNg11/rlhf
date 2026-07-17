@@ -9,6 +9,7 @@ from grpo_math.eval.benchmarks import (
     BENCHMARKS,
     BenchmarkSpec,
     EvalProblem,
+    gsm8k_gold,
     load_benchmark,
     register_local_benchmark,
 )
@@ -91,6 +92,10 @@ def test_limit_truncates_after_ordering():
 def test_unknown_benchmark_raises():
     with pytest.raises(KeyError):
         load_benchmark("not_a_real_benchmark")
+
+
+def test_gsm8k_gold_golden():
+    assert gsm8k_gold("reasoning\n#### 1,234") == "1234"
 
 
 def test_import_does_not_require_datasets_or_vllm():

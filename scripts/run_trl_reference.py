@@ -21,9 +21,10 @@ Config mapping (``grpo_math`` config key -> ``trl.GRPOConfig`` field):
     weight_decay                   = 0.0
     max_grad_norm                  = train.max_grad_norm
     num_generations                = rollout.group_size            (GRPO group size)
-    per_device_train_batch_size    = 16
-    gradient_accumulation_steps    = 8
-    steps_per_generation           = 2
+    per_device_train_batch_size    = _PER_DEVICE_BATCH (16; single-GPU micro-batch knob)
+    gradient_accumulation_steps    = (train.ppo_mini_batch_size * rollout.group_size)
+                                       // _PER_DEVICE_BATCH
+    steps_per_generation           = train.prompts_per_step // train.ppo_mini_batch_size
     num_iterations                 = 1
     epsilon                        = train.clip_ratio
     beta                           = train.kl_coef
@@ -81,6 +82,41 @@ _INSTALL_HINT = (
     "run_trl_reference.py requires the `trl` extra (trl, transformers, datasets; "
     "vllm for the colocated generation backend). Install with: pip install -e .[trl]"
 )
+
+_PER_DEVICE_BATCH = 16  # single-GPU micro-batch knob
+
+
+def derive_trl_batch_shape(cfg: dict) -> tuple[int, int, int]:
+    """Derive ``(per_device_train_batch_size, gradient_accumulation_steps,
+    steps_per_generation)`` for ``trl.GRPOConfig`` from a ``grpo_math`` cfg.
+
+    ``completions_per_update = train.ppo_mini_batch_size * rollout.group_size``
+    must divide evenly by ``_PER_DEVICE_BATCH`` (the single-GPU micro-batch
+    size); the quotient is TRL's ``gradient_accumulation_steps``.
+
+    ``steps_per_generation = train.prompts_per_step // train.ppo_mini_batch_size``,
+    requiring ``prompts_per_step`` to divide evenly by ``ppo_mini_batch_size``.
+
+    Both divisibility requirements fail loudly (assert) rather than silently
+    rounding, since a silent rounding would desync TRL's batch shape from
+    ours without any visible symptom.
+    """
+    completions_per_update = cfg["train"]["ppo_mini_batch_size"] * cfg["rollout"]["group_size"]
+    per_device_train_batch_size = _PER_DEVICE_BATCH
+    assert completions_per_update % per_device_train_batch_size == 0, (
+        f"completions_per_update (train.ppo_mini_batch_size * rollout.group_size = "
+        f"{completions_per_update}) must be divisible by per_device_train_batch_size "
+        f"({per_device_train_batch_size})"
+    )
+    gradient_accumulation_steps = completions_per_update // per_device_train_batch_size
+
+    assert cfg["train"]["prompts_per_step"] % cfg["train"]["ppo_mini_batch_size"] == 0, (
+        f"train.prompts_per_step ({cfg['train']['prompts_per_step']}) must be divisible "
+        f"by train.ppo_mini_batch_size ({cfg['train']['ppo_mini_batch_size']})"
+    )
+    steps_per_generation = cfg["train"]["prompts_per_step"] // cfg["train"]["ppo_mini_batch_size"]
+
+    return per_device_train_batch_size, gradient_accumulation_steps, steps_per_generation
 
 
 def reward_fn_factory(format_bonus: float):
@@ -179,6 +215,9 @@ def main(argv: list[str] | None = None) -> int:
 
     reward_fn = reward_fn_factory(cfg["train"]["format_bonus"])
     max_steps = args.max_steps if args.max_steps is not None else cfg["max_steps"]
+    per_device_train_batch_size, gradient_accumulation_steps, steps_per_generation = (
+        derive_trl_batch_shape(cfg)
+    )
 
     grpo_config = GRPOConfig(
         output_dir=str(run_dir),
@@ -187,9 +226,9 @@ def main(argv: list[str] | None = None) -> int:
         weight_decay=0.0,
         max_grad_norm=cfg["train"]["max_grad_norm"],
         num_generations=cfg["rollout"]["group_size"],  # GRPO group size
-        per_device_train_batch_size=16,
-        gradient_accumulation_steps=8,
-        steps_per_generation=2,
+        per_device_train_batch_size=per_device_train_batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        steps_per_generation=steps_per_generation,
         num_iterations=1,
         epsilon=cfg["train"]["clip_ratio"],
         beta=cfg["train"]["kl_coef"],

@@ -83,10 +83,12 @@ class WeightSyncWorkerExtension:
     the trainer side) so the weight-sync handshake is a real end-to-end byte
     comparison, then loads the weights into the running model."""
 
-    def update_weights(self, weights: list[tuple[str, torch.Tensor]]) -> dict[str, str]:
-        received = {name: tensor_checksum(t) for name, t in weights}
+    def update_weights(
+        self, weights: list[tuple[str, torch.Tensor]], want_checksums: bool = True
+    ) -> dict[str, str]:
+        weights = list(weights)
         self.model_runner.model.load_weights(weights)
-        return received
+        return {name: tensor_checksum(t) for name, t in weights} if want_checksums else {}
 
 
 class VLLMRollout:
@@ -174,8 +176,12 @@ class VLLMRollout:
     def wake(self) -> None:
         self.llm.wake_up()
 
-    def sync_weights(self, weights: Iterator[tuple[str, torch.Tensor]]) -> dict[str, str]:
-        results = self.llm.collective_rpc("update_weights", args=(list(weights),))
+    def sync_weights(
+        self, weights: Iterator[tuple[str, torch.Tensor]], *, want_checksums: bool = True
+    ) -> dict[str, str]:
+        results = self.llm.collective_rpc(
+            "update_weights", args=(list(weights), want_checksums)
+        )
         return results[0]
 
     def as_generation_backend(self) -> RolloutGenerationBackend:

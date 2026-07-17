@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from grpo_math.eval.benchmarks import ANSWER_INSTRUCTION, EvalProblem
+from grpo_math.eval.benchmarks import ANSWER_INSTRUCTION, EvalProblem, gsm8k_gold
 
 
 def split_holdout(items: list, dev_holdout: int) -> tuple[list, list]:
@@ -36,7 +36,7 @@ def load_gsm8k_train(*, dev_holdout: int = 500) -> tuple[list[EvalProblem], list
     ds = load_dataset("openai/gsm8k", "main", split="train")
     problems = []
     for i, row in enumerate(ds):
-        gold = str(row["answer"]).split("#### ")[-1].strip().replace(",", "")
+        gold = gsm8k_gold(str(row["answer"]))
         problems.append(
             EvalProblem(
                 problem_id=f"gsm8k_train_{i}",
