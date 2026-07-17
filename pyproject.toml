@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "torch", "matplotlib"]
 gpu = ["vllm>=0.8.0", "torch", "transformers", "datasets", "wandb"]
 
 [tool.setuptools.packages.find]
