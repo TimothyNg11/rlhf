@@ -102,16 +102,23 @@ def bf16_sync_tensors(model) -> Iterator[tuple[str, torch.Tensor]]:
         yield name, param.detach().to(torch.bfloat16).contiguous()
 
 
+def tensor_checksum(t: torch.Tensor) -> str:
+    """SHA-256 hexdigest of ``t``'s raw bytes (viewed as ``uint8``).
+
+    Shared by :func:`model_checksums` (trainer side) and the vLLM
+    ``WeightSyncWorkerExtension`` (engine side) so the weight-sync handshake
+    hashes both ends with byte-identical logic. ``t`` must be contiguous
+    (:func:`bf16_sync_tensors` guarantees this)."""
+    raw_bytes = t.cpu().view(torch.uint8).numpy().tobytes()
+    return hashlib.sha256(raw_bytes).hexdigest()
+
+
 def model_checksums(model) -> dict[str, str]:
     """SHA-256 hexdigest of the exact bytes :func:`bf16_sync_tensors` would
     send for each parameter, used for the trainer<->vLLM weight-sync
     handshake. Computed from the bf16-converted, contiguous tensor (not the
     fp32 master)."""
-    checksums = {}
-    for name, tensor in bf16_sync_tensors(model):
-        raw_bytes = tensor.cpu().view(torch.uint8).numpy().tobytes()
-        checksums[name] = hashlib.sha256(raw_bytes).hexdigest()
-    return checksums
+    return {name: tensor_checksum(tensor) for name, tensor in bf16_sync_tensors(model)}
 
 
 class HFPolicy:
