@@ -83,9 +83,12 @@ class WeightSyncWorkerExtension:
     the trainer side) so the weight-sync handshake is a real end-to-end byte
     comparison, then loads the weights into the running model."""
 
-    def update_weights(
+    def grpo_update_weights(
         self, weights: list[tuple[str, torch.Tensor]], want_checksums: bool = True
     ) -> dict[str, str]:
+        # Named grpo_update_weights (not update_weights): vLLM >= 0.25 gives the
+        # worker a built-in `update_weights(update_info: dict) -> None` and
+        # worker_extension_cls refuses to shadow existing worker attributes.
         weights = list(weights)
         self.model_runner.model.load_weights(weights)
         return {name: tensor_checksum(t) for name, t in weights} if want_checksums else {}
@@ -180,7 +183,7 @@ class VLLMRollout:
         self, weights: Iterator[tuple[str, torch.Tensor]], *, want_checksums: bool = True
     ) -> dict[str, str]:
         results = self.llm.collective_rpc(
-            "update_weights", args=(list(weights), want_checksums)
+            "grpo_update_weights", args=(list(weights), want_checksums)
         )
         return results[0]
 
