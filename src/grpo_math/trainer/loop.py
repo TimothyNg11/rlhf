@@ -328,6 +328,12 @@ class GRPOTrainer:
             step_start = time.perf_counter()
 
             # 1. wake + weight-sync handshake -------------------------------
+            # Release torch's cached blocks before the engine re-maps its GPU
+            # memory: after the first optimizer step the HF side holds AdamW
+            # states plus cached (freed) logits buffers, and without this the
+            # cumem allocator OOMs on wake_up a few iterations in.
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
             self.rollout.wake()
             do_sync_check = step % self.sync_check_every == 0
             sent = self.policy.checksums() if do_sync_check else None
