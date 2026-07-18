@@ -48,12 +48,16 @@ from grpo_math.trainer.checkpoint import (
 )
 from grpo_math.trainer.metrics import MetricsLogger
 
-# Step-0 sanity tolerances. These are a stricter simplification of the plan's
-# p99-ratio intent: at step 0 the old-logprobs (policy forward sweep) equal the
-# fresh policy's logprobs, so before the first optimizer update the ratio is ~1
-# everywhere -- we check the token mean and the token max directly.
+# Step-0 sanity tolerances (docs/PLAN.md): before the first optimizer update
+# the recomputed old-logprobs equal the fresh policy's logprobs, so ratios are
+# ~1 everywhere. We assert the token mean and the p99 of |ratio - 1|. The MAX
+# is logged but deliberately NOT asserted: bf16 kernels are batch-shape
+# sensitive, and across ~10k tokens the extreme-value tail of that noise
+# reaches ratio ~1.2-1.3 on a handful of tokens even when everything is
+# correct (observed on H100 at step 0; a real misalignment shows up as
+# ratios of e^2..e^10 and blows the mean check instead).
 _RATIO_MEAN_TOL = 1e-2
-_RATIO_MAX_TOL = 0.05
+_RATIO_P99_TOL = 0.05
 
 
 def pack_response_values(values: list[torch.Tensor], batch: TokenBatch) -> torch.Tensor:
@@ -550,6 +554,7 @@ class GRPOTrainer:
             mini_loss_item_sum = 0.0
             mini_ratio_sum = 0.0
             mini_ratio_max = 0.0
+            mini_ratio_p99 = 0.0
             mini_n_tokens = 0
             mini_pg_loss_sum = 0.0
             mini_kl_sum = 0.0
@@ -596,6 +601,7 @@ class GRPOTrainer:
                 mini_loss_item_sum += float(loss_out.loss.item())
                 mini_ratio_sum += loss_out.ratio_sum
                 mini_ratio_max = max(mini_ratio_max, loss_out.ratio_max)
+                mini_ratio_p99 = max(mini_ratio_p99, loss_out.ratio_abs_dev_p99)
                 mini_n_tokens += loss_out.n_tokens
                 mini_pg_loss_sum += loss_out.pg_loss_sum
                 mini_kl_sum += loss_out.kl_sum
@@ -618,9 +624,10 @@ class GRPOTrainer:
                         "(expected ~1.0; recomputed old-logprobs must equal the fresh "
                         "policy's logprobs before the first optimizer step)"
                     )
-                    assert mini_ratio_max < 1.0 + _RATIO_MAX_TOL, (
-                        f"step-0 ratio_max sanity check failed: ratio_max={mini_ratio_max} "
-                        f"(expected < {1.0 + _RATIO_MAX_TOL})"
+                    assert mini_ratio_p99 < _RATIO_P99_TOL, (
+                        f"step-0 ratio p99 sanity check failed: p99 |ratio - 1| = "
+                        f"{mini_ratio_p99} (expected < {_RATIO_P99_TOL}; worst micro-batch; "
+                        f"ratio_max was {mini_ratio_max})"
                     )
                     self.step0_checks_ran = True
 

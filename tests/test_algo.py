@@ -196,6 +196,8 @@ def test_clip_loss_golden():
     assert out.loss.item() == pytest.approx(-0.2)
     assert out.clip_count == 2
     assert out.n_tokens == 2
+    # |ratio - 1| is 0.5 for both tokens -> p99 of that two-value set is 0.5.
+    assert out.ratio_abs_dev_p99 == pytest.approx(0.5)
 
 
 def test_clip_not_binding_inside_band():

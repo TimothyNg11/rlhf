@@ -131,6 +131,7 @@ class MicrobatchLossOut:
     clip_count: int  # masked tokens where the clip binds (definition below)
     ratio_sum: float  # sum of ratio over masked tokens (detached)
     ratio_max: float  # max ratio over masked tokens (0.0 if n_tokens == 0)
+    ratio_abs_dev_p99: float  # p99 of |ratio - 1| over masked tokens (0.0 if n_tokens == 0)
 
 
 def grpo_microbatch_loss(
@@ -182,7 +183,15 @@ def grpo_microbatch_loss(
             (ratio < 1.0 - clip_ratio) & (advantages < 0)
         )
         clip_count = int((clip_binds & response_mask).sum().item())
-        ratio_max = float(ratio[response_mask].max().item()) if n_tokens > 0 else 0.0
+        if n_tokens > 0:
+            masked_ratio = ratio[response_mask]
+            ratio_max = float(masked_ratio.max().item())
+            ratio_abs_dev_p99 = float(
+                torch.quantile((masked_ratio - 1.0).abs().float(), 0.99).item()
+            )
+        else:
+            ratio_max = 0.0
+            ratio_abs_dev_p99 = 0.0
 
         pg_loss_sum = float((pg * mask).sum().item())
         kl_sum = float((kl * mask).sum().item())
@@ -196,4 +205,5 @@ def grpo_microbatch_loss(
         clip_count=clip_count,
         ratio_sum=ratio_sum,
         ratio_max=ratio_max,
+        ratio_abs_dev_p99=ratio_abs_dev_p99,
     )
