@@ -85,7 +85,11 @@ _INSTALL_HINT = (
     "vllm for the colocated generation backend). Install with: pip install -e .[trl]"
 )
 
-_PER_DEVICE_BATCH = 16  # single-GPU micro-batch knob
+# Single-GPU micro-batch knob. 2, not 16: TRL/accelerate materializes fp32
+# logits over the 152k vocab per micro-batch (~28 GiB at B=16, ~3.5k padded
+# tokens) next to the colocated vLLM engine — B=16 OOMs an 80 GB card. Same
+# constraint as our trainer's train.micro_batch_size (see configs/base.yaml).
+_PER_DEVICE_BATCH = 2
 
 
 def derive_trl_batch_shape(cfg: dict) -> tuple[int, int, int]:

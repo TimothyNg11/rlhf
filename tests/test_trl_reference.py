@@ -64,11 +64,11 @@ def test_derive_trl_batch_shape_base_shape():
     # base.yaml shape: ppo_mini_batch_size 32, group_size 4, prompts_per_step 64.
     run_trl_reference = _load_script_module("run_trl_reference_cli4", "run_trl_reference.py")
     cfg = {"train": {"ppo_mini_batch_size": 32, "prompts_per_step": 64}, "rollout": {"group_size": 4}}
-    assert run_trl_reference.derive_trl_batch_shape(cfg) == (16, 8, 2)
+    assert run_trl_reference.derive_trl_batch_shape(cfg) == (2, 64, 2)
 
 
 def test_derive_trl_batch_shape_ablation_g8_shape():
     # ablation_g8.yaml shape: ppo_mini_batch_size 32, group_size 8, prompts_per_step 32.
     run_trl_reference = _load_script_module("run_trl_reference_cli5", "run_trl_reference.py")
     cfg = {"train": {"ppo_mini_batch_size": 32, "prompts_per_step": 32}, "rollout": {"group_size": 8}}
-    assert run_trl_reference.derive_trl_batch_shape(cfg) == (16, 16, 1)
+    assert run_trl_reference.derive_trl_batch_shape(cfg) == (2, 128, 1)
