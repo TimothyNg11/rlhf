@@ -47,17 +47,23 @@ from grpo_math.trainer.checkpoint import (
     save_checkpoint,
 )
 from grpo_math.trainer.metrics import MetricsLogger
+from grpo_math.trainer.policy import response_logprobs
 
-# Step-0 sanity tolerances (docs/PLAN.md): before the first optimizer update
-# the recomputed old-logprobs equal the fresh policy's logprobs, so ratios are
-# ~1 everywhere. We assert the token mean and the p99 of |ratio - 1|. The MAX
-# is logged but deliberately NOT asserted: bf16 kernels are batch-shape
-# sensitive, and across ~10k tokens the extreme-value tail of that noise
-# reaches ratio ~1.2-1.3 on a handful of tokens even when everything is
-# correct (observed on H100 at step 0; a real misalignment shows up as
-# ratios of e^2..e^10 and blows the mean check instead).
+# Step-0 sanity checks (docs/PLAN.md): before the first optimizer update the
+# recomputed old-logprobs equal the fresh policy's logprobs.
+#
+# The bf16 production forwards are batch-shape sensitive (observed on H100:
+# deterministic per-token |ratio - 1| up to ~0.27, p99 ~0.12, while the mean
+# stayed within 1e-2 — kernel-path divergence between the sweep's collation
+# and the training collation, not a misalignment; a real off-by-one gives
+# ratios of e^2..e^10). So the ratio-mean check runs on the production bf16
+# tensors, while the ALIGNMENT check — the one that catches packing/masking/
+# shift bugs, which are dtype-independent — reruns both packing paths for the
+# first micro-batch's samples in pure fp32 (autocast off), where kernel noise
+# is ~1e-4 and the tolerance can stay tight. p99/max of the bf16 ratios are
+# logged as diagnostics, not asserted.
 _RATIO_MEAN_TOL = 1e-2
-_RATIO_P99_TOL = 0.05
+_ALIGN_LP_TOL = 1e-2
 
 
 def pack_response_values(values: list[torch.Tensor], batch: TokenBatch) -> torch.Tensor:
@@ -499,6 +505,44 @@ class GRPOTrainer:
                     rng_state={"torch": torch.get_rng_state()},
                 )
 
+    def _step0_alignment_check(self, micro_indices, flat_kept) -> None:
+        """Dtype-independent packing/shift verification (the real point of the
+        step-0 gate): rerun BOTH logprob paths for one micro-batch's samples in
+        pure fp32 with autocast off — the per-sample sweep collation
+        (``response_logprobs``'s own batching) vs the training collation — and
+        require near-equality per token. Kernel noise in fp32 is ~1e-4; any
+        packing, masking, or causal-shift bug shows up as |dev| >= ~1."""
+        samples = [
+            (flat_kept[i].prompt_token_ids, flat_kept[i].response_token_ids)
+            for i in micro_indices
+        ]
+        sweep_lp, _ = response_logprobs(
+            self.policy.model,
+            samples,
+            micro_batch_size=len(samples),
+            pad_token_id=self.pad_token_id,
+        )
+        batch = collate_token_batch(samples, pad_token_id=self.pad_token_id)
+        input_ids = batch.input_ids.to(self.device)
+        attention_mask = batch.attention_mask.to(self.device)
+        with torch.no_grad():
+            out = self.policy.model(input_ids=input_ids, attention_mask=attention_mask)
+        logits = getattr(out, "logits", out)
+        train_lp, _ = gather_logprobs_and_entropy(logits[:, :-1], input_ids[:, 1:])
+        sweep_packed = pack_response_values(sweep_lp, batch).to(train_lp.device)
+        resp_mask = batch.response_mask[:, 1:].to(train_lp.device)
+        max_dev = (
+            float((train_lp - sweep_packed).abs()[resp_mask].max().item())
+            if bool(resp_mask.any())
+            else 0.0
+        )
+        assert max_dev < _ALIGN_LP_TOL, (
+            f"step-0 fp32 alignment check failed: max |logprob dev| = {max_dev} "
+            f"(expected < {_ALIGN_LP_TOL}). The sweep collation and the training "
+            "collation disagree in pure fp32 — this indicates a packing/masking/"
+            "causal-shift bug, not kernel noise."
+        )
+
     def _train_on_kept(self, step, kept_groups, flat_kept, flat_adv):
         """Steps 6-8: no-grad old/ref log-prob sweep, then the permuted
         mini-batch / micro-batch policy update with the step-0 self-checks.
@@ -622,13 +666,10 @@ class GRPOTrainer:
                     assert abs(ratio_mean_mb - 1.0) < _RATIO_MEAN_TOL, (
                         f"step-0 ratio_mean sanity check failed: ratio_mean={ratio_mean_mb} "
                         "(expected ~1.0; recomputed old-logprobs must equal the fresh "
-                        "policy's logprobs before the first optimizer step)"
+                        "policy's logprobs before the first optimizer step; bf16 "
+                        f"diagnostics: ratio_max={mini_ratio_max}, p99 |ratio-1|={mini_ratio_p99})"
                     )
-                    assert mini_ratio_p99 < _RATIO_P99_TOL, (
-                        f"step-0 ratio p99 sanity check failed: p99 |ratio - 1| = "
-                        f"{mini_ratio_p99} (expected < {_RATIO_P99_TOL}; worst micro-batch; "
-                        f"ratio_max was {mini_ratio_max})"
-                    )
+                    self._step0_alignment_check(mini_flat_indices[:micro], flat_kept)
                     self.step0_checks_ran = True
 
             grad_norm = float(
