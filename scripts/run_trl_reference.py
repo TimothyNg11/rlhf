@@ -32,8 +32,10 @@ Config mapping (``grpo_math`` config key -> ``trl.GRPOConfig`` field):
     scale_rewards                  = True
     temperature                    = rollout.temperature
     top_p                          = rollout.top_p
-    max_prompt_length              = rollout.max_prompt_tokens
     max_completion_length          = rollout.max_response_tokens
+    vllm_max_model_length          = rollout.max_prompt_tokens + rollout.max_response_tokens
+                                     (TRL 1.8 dropped max_prompt_length; GSM8K prompts
+                                      are all far below our 512-token cap anyway)
     bf16                           = True                         (fp32 master + autocast; deliberately
                                                                      NOT passing model_init_kwargs torch_dtype)
     gradient_checkpointing         = train.grad_checkpointing
@@ -236,8 +238,13 @@ def main(argv: list[str] | None = None) -> int:
         scale_rewards=True,
         temperature=cfg["rollout"]["temperature"],
         top_p=cfg["rollout"]["top_p"],
-        max_prompt_length=cfg["rollout"]["max_prompt_tokens"],
+        # TRL 1.8 has no max_prompt_length (prompt capping moved out of the
+        # config); GSM8K prompts are all well under our 512-token cap, and
+        # vllm_max_model_length mirrors our engine's prompt+response budget.
         max_completion_length=cfg["rollout"]["max_response_tokens"],
+        vllm_max_model_length=(
+            cfg["rollout"]["max_prompt_tokens"] + cfg["rollout"]["max_response_tokens"]
+        ),
         bf16=True,  # fp32 master + autocast; deliberately NOT passing model_init_kwargs torch_dtype
         gradient_checkpointing=cfg["train"]["grad_checkpointing"],
         use_vllm=True,
