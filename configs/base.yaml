@@ -19,7 +19,9 @@ train:
   truncation_mode: zero_reward
   grad_checkpointing: true
   seed: 0
-  micro_batch_size: 8
+  # 2, not 8: the logprob forward materializes fp32 [B, T, V] tensors over
+  # Qwen's 152k vocab; at ~3.5k padded tokens, B=8 OOMs an 80 GB card.
+  micro_batch_size: 2
   format_bonus: 0.2
   max_grad_norm: 1.0
   save_every: 80

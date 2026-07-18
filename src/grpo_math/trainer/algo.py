@@ -67,11 +67,18 @@ def gather_logprobs_and_entropy(
     ``chosen_logprobs`` is gathered at ``targets`` and
     ``entropy = -(softmax * log_softmax).sum(-1)``.
     """
-    logits = logits.float()
-    log_probs = torch.log_softmax(logits, dim=-1)
+    # dtype=float32 casts inside log_softmax: ONE fp32 [B, T, V] allocation
+    # instead of a logits.float() copy plus the softmax output. At B=8,
+    # T~3.5k, V~152k each such copy is ~17 GB -- this function's memory
+    # footprint decides the trainer's micro-batch size.
+    log_probs = torch.log_softmax(logits, dim=-1, dtype=torch.float32)
     chosen_logprobs = torch.gather(log_probs, dim=-1, index=targets.unsqueeze(-1)).squeeze(-1)
-    probs = log_probs.exp()
-    entropy = -(probs * log_probs).sum(dim=-1)
+    # Entropy never receives gradient (train.entropy_coef == 0.0 is asserted
+    # by the trainer), so compute it under no_grad with an in-place product,
+    # avoiding a third full-size allocation and any autograd graph for it.
+    with torch.no_grad():
+        probs = log_probs.exp()
+        entropy = -probs.mul_(log_probs).sum(dim=-1)
     return chosen_logprobs, entropy
 
 
