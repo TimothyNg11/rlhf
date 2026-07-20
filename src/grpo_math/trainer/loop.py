@@ -141,11 +141,14 @@ class GRPOTrainer:
             "'zero_reward'; the rewards module also supports 'mask' but this "
             f"trainer does not implement it. got {train_cfg['truncation_mode']!r}"
         )
-        assert train_cfg["skip_zero_variance_groups"] is True, (
-            "this trainer always drops zero-variance groups; "
-            "train.skip_zero_variance_groups == False is not implemented. "
-            f"got {train_cfg['skip_zero_variance_groups']!r}"
-        )
+        # True  -> zero-variance groups leave the batch entirely (their tokens
+        #          contribute no PG term, no KL term, and no denominator mass).
+        # False -> they stay at advantage 0, TRL/DeepSeek-style: no PG signal,
+        #          but their tokens still carry KL gradient and still count in
+        #          the token denominator, anchoring the policy on the prompts it
+        #          answers most consistently. G1 (docs/PLAN.md, report/g1_overlay.png)
+        #          traced our entropy blowup to exactly this difference.
+        self.skip_zero_variance_groups = bool(train_cfg["skip_zero_variance_groups"])
         expected_holdout = BENCHMARKS["gsm8k_dev"].take_last
         assert cfg["data"]["dev_holdout"] == expected_holdout, (
             f"cfg data.dev_holdout ({cfg['data']['dev_holdout']}) must equal "
@@ -407,16 +410,19 @@ class GRPOTrainer:
             response_len_mean = float(np.mean(all_resp_len))
             response_len_p90 = float(np.percentile(all_resp_len, 90))
 
-            # 5. advantages + drop zero-variance groups ---------------------
+            # 5. advantages (+ zero-variance groups per skip_zero_variance_groups)
             rewards_t = torch.tensor(reward_rows, dtype=torch.float32)
             advantages, keep_mask = group_normalized_advantages(rewards_t)
             n_zero_var_groups = int((~keep_mask).sum().item())
 
             kept_groups: list[list[int]] = []  # each: flat indices into flat_kept
-            flat_kept = []  # RolloutSamples of kept groups
+            flat_kept = []  # RolloutSamples of groups in the training batch
             flat_adv: list[float] = []
             for group_idx, group in enumerate(groups):
-                if not bool(keep_mask[group_idx]):
+                # When keeping them, a zero-variance group's advantages are
+                # already exactly 0 (the numerator r - mean is identically 0),
+                # so no special-casing of the values is needed here.
+                if self.skip_zero_variance_groups and not bool(keep_mask[group_idx]):
                     continue
                 group_indices = []
                 for sample_idx, sample in enumerate(group):

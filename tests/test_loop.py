@@ -307,6 +307,43 @@ def test_all_groups_zero_variance_step_is_skipped(tmp_path):
     assert row["n_zero_var_groups"] == 4
 
 
+def test_zero_variance_groups_kept_when_flag_false(tmp_path):
+    # TRL/DeepSeek parity path: the group stays in the batch at advantage 0.
+    cfg = _make_cfg()
+    cfg["max_steps"] = 1
+    cfg["train"]["skip_zero_variance_groups"] = False
+    answers = _variance_answers()
+    answers["Q1"] = ["\\boxed{1}"]  # both completions correct -> zero variance
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(answers), cfg=cfg
+    )
+    trainer.train()
+
+    row = _train_rows(tmp_path)[0]
+    assert row["n_zero_var_groups"] == 1  # still counted/reported
+    assert row["n_completions"] == 4 * 2  # but nothing dropped: all prompts x G
+
+
+def test_all_zero_variance_still_updates_when_keeping(tmp_path):
+    # With every group at advantage 0 the PG term vanishes exactly, but the KL
+    # term does not -- so the optimizer still steps. This is the anchoring
+    # mechanism that keeps TRL stable where our dropping path drifts.
+    cfg = _make_cfg()
+    cfg["max_steps"] = 1
+    cfg["train"]["skip_zero_variance_groups"] = False
+    answers = {"Q1": ["\\boxed{1}"], "Q2": ["\\boxed{2}"], "Q3": ["\\boxed{3}"], "Q4": ["\\boxed{4}"]}
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(answers), cfg=cfg
+    )
+    trainer.train()
+
+    row = _train_rows(tmp_path)[0]
+    assert row["n_zero_var_groups"] == 4
+    assert row["n_updates"] == 2  # vs 0 on the dropping path
+    assert row["pg_loss"] == 0.0  # advantages all exactly 0 -> no PG signal
+    assert row["kl_mean"] > 0.0  # KL is what remains, and it is what trains
+
+
 def test_step0_assertions_run_and_pass(tmp_path):
     cfg = _make_cfg()
     cfg["max_steps"] = 1

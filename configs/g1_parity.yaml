@@ -1,0 +1,8 @@
+inherit: g1_100.yaml
+run_name: g1_parity
+train:
+  # TRL/DeepSeek parity: keep zero-variance groups at advantage 0 rather than
+  # dropping them, so their tokens still carry KL gradient and still count in
+  # the token denominator. G1 traced our entropy blowup (~iter 55-60) to this
+  # difference -- see report/g1_overlay.png and docs/PLAN.md.
+  skip_zero_variance_groups: false
