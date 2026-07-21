@@ -92,10 +92,10 @@ the blow-up; that result was confounded and is not repeated).
 
 | Lever | Change | Why |
 |---|---|---|
-| Learning rate | 2e-6 → 1e-6 | Reverts our own documented 2× deviation from the DeepScaleR reference; cuts the over-stepping (95% clip-saturated). |
-| Grad-norm clip | 1.0 → 0.5 | Caps the outlier spikes. |
+| Learning rate | 2e-6 → 1e-6 | Reverts our own documented 2× deviation from the DeepScaleR reference. Puts the effective step ~0.57× the stable TRL run's (ours was ~1.15×), safely below the reference without over-damping. |
 | KL coefficient | 0.001 → 0.003 | Gentle anchor to the low-entropy reference, directly opposing entropy increase (a 3× bump, not the confounded 10×). |
 | Truncation | `zero_reward` → `mask` | DAPO overlong filtering: truncated completions inform the group baseline but are excluded from the loss instead of being punished with reward 0. Breaks the length→truncation→punishment→destabilization feedback. |
+| Entropy stop-loss | new, threshold 2.0 | The G2 gate the plan called for: aborts the run (with a checkpoint) the moment entropy runs away (~iter 56), so a divergence costs ~half the budget instead of the full run. Never fires on a healthy run (entropy ~0.1–0.5). `max_grad_norm` stays at 1.0 (what the stable TRL run used); the stop-loss makes extra clip damping unnecessary. |
 
 Things already correct (ruled out as causes): token-level loss (DAPO-recommended,
 no length bias in normalization — consistent with length not growing until *after*

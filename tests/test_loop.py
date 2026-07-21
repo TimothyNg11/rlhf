@@ -153,6 +153,11 @@ def _make_cfg():
     cfg["train"]["ppo_mini_batch_size"] = 2
     cfg["train"]["micro_batch_size"] = 2
     cfg["train"]["save_every"] = 2
+    # The tiny fake policy has a 32-token vocab (max entropy ln 32 ~ 3.5), a
+    # totally different scale from the real 152k-vocab model the 2.0 stop-loss
+    # threshold targets; disable it here so tests exercise the full loop. The
+    # stop-loss itself is covered by its own dedicated tests.
+    cfg["train"]["entropy_abort_threshold"] = None
     cfg["rollout"]["group_size"] = 2
     ev = cfg["eval_during_training"]
     cfg["eval_during_training"] = {
@@ -431,6 +436,32 @@ def test_invalid_truncation_mode_rejected(tmp_path):
     with pytest.raises(AssertionError, match="truncation_mode"):
         _make_trainer(tmp_path, _training_problems(),
                       _answers_with_eval(_variance_answers()), cfg=cfg)
+
+
+def test_entropy_stop_loss_aborts_early(tmp_path):
+    # A tiny threshold guarantees the first step's entropy exceeds it, so the
+    # run must abort after step 1 (not run all 3), still logging + checkpointing.
+    cfg = _make_cfg()
+    cfg["max_steps"] = 3
+    cfg["train"]["entropy_abort_threshold"] = 1e-6
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+    )
+    trainer.train()
+    rows = _train_rows(tmp_path)
+    assert [r["step"] for r in rows] == [1]  # aborted after the first step
+    assert (tmp_path / "checkpoints" / "step_0001").exists()  # checkpointed on abort
+
+
+def test_entropy_stop_loss_disabled_runs_full(tmp_path):
+    cfg = _make_cfg()
+    cfg["max_steps"] = 3
+    cfg["train"]["entropy_abort_threshold"] = None
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+    )
+    trainer.train()
+    assert [r["step"] for r in _train_rows(tmp_path)] == [1, 2, 3]
 
 
 def test_step0_assertions_run_and_pass(tmp_path):

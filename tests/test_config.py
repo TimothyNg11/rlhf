@@ -25,6 +25,7 @@ def test_load_base_config_no_inherit():
     assert cfg["train"]["micro_batch_size"] == 2
     assert cfg["train"]["use_tis"] is True
     assert cfg["train"]["tis_cap"] == 2.0
+    assert cfg["train"]["entropy_abort_threshold"] == 2.0
     assert cfg["train"]["format_bonus"] == 0.2
     assert cfg["train"]["max_grad_norm"] == 1.0
     assert cfg["train"]["save_every"] == 80

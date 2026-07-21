@@ -33,6 +33,12 @@ train:
   # traced our blow-up to its absence; cap is verl's typical 1.5-5.0 range.
   use_tis: true
   tis_cap: 2.0
+  # G2 stop-loss (docs/PLAN.md): abort the run if mean policy entropy exceeds
+  # this, so a diverged run (entropy runaway) stops early instead of burning
+  # the full budget. Healthy runs sit ~0.1-0.5; the blowups cross 2.0 around
+  # iter ~56 then explode to ~9, so 2.0 aborts once divergence is unambiguous
+  # with no false alarms. Set null to disable.
+  entropy_abort_threshold: 2.0
 rollout:
   group_size: 4
   # 0.6 (the 1.5B recipe value) is too cold for exploration at 0.5B; deviation

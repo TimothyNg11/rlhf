@@ -160,6 +160,8 @@ class GRPOTrainer:
         # Truncated importance sampling for the rollout-vs-recompute mismatch.
         self.use_tis = bool(train_cfg.get("use_tis", False))
         self.tis_cap = float(train_cfg.get("tis_cap", 2.0))
+        # G2 stop-loss: abort once mean policy entropy blows past this (None = off).
+        self.entropy_abort_threshold = train_cfg.get("entropy_abort_threshold")
         expected_holdout = BENCHMARKS["gsm8k_dev"].take_last
         assert cfg["data"]["dev_holdout"] == expected_holdout, (
             f"cfg data.dev_holdout ({cfg['data']['dev_holdout']}) must equal "
@@ -522,8 +524,14 @@ class GRPOTrainer:
                 }
             )
 
-            # 10. checkpoint -------------------------------------------------
-            if (step + 1) % train_cfg["save_every"] == 0 or (step + 1) == self.max_steps:
+            # 10. checkpoint (+ G2 entropy stop-loss) ------------------------
+            aborting = (
+                self.entropy_abort_threshold is not None
+                and entropy_mean is not None
+                and entropy_mean > self.entropy_abort_threshold
+            )
+            is_save_step = (step + 1) % train_cfg["save_every"] == 0 or (step + 1) == self.max_steps
+            if is_save_step or aborting:  # always checkpoint before aborting
                 save_checkpoint(
                     self.run_dir / "checkpoints",
                     step=step + 1,
@@ -540,6 +548,14 @@ class GRPOTrainer:
                     # seeds), so no global numpy state is carried across steps.
                     rng_state={"torch": torch.get_rng_state()},
                 )
+            if aborting:
+                print(
+                    f"G2 stop-loss: entropy_mean={entropy_mean:.3f} exceeded "
+                    f"entropy_abort_threshold={self.entropy_abort_threshold} at step "
+                    f"{step + 1}; aborting to avoid burning compute on a diverged run.",
+                    flush=True,
+                )
+                break
 
     def _step0_alignment_check(self, micro_indices, flat_kept) -> None:
         """Dtype-independent packing/shift verification (the real point of the

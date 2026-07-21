@@ -8,11 +8,14 @@ run_name: g1_robust
 # run over-steps vs the stable TRL reference (raw grad 2.6x, 95% clip-saturated,
 # entropy 2.2x) before entropy runs away and drags length with it.
 train:
-  # Revert our own documented 2x deviation from the DeepScaleR reference (1e-6):
-  # reduces the systematic over-stepping.
+  # Revert our own documented 2x deviation from the DeepScaleR reference (1e-6).
+  # This alone puts the effective step ~0.57x the stable TRL run's (our original
+  # was ~1.15x TRL's and tipped over), i.e. safely below the stable reference --
+  # without over-damping into a stable-but-flat run. max_grad_norm stays at the
+  # inherited 1.0 (the value the stable TRL run used); the entropy stop-loss
+  # (base.yaml) bounds the cost if it still diverges, so extra clip damping isn't
+  # needed.
   lr: 1.0e-6
-  # Cap the outlier spikes: 95% of steps were saturating the 1.0 clip.
-  max_grad_norm: 0.5
   # Gentle 3x anchor toward the (low-entropy) reference, directly opposing the
   # entropy runaway. NOT the 10x that was confounded with the temp change.
   kl_coef: 0.003
