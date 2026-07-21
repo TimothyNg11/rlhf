@@ -61,6 +61,49 @@ sampler logprobs already captured on each `RolloutSample`. Config knobs
 - TRL `GRPOConfig.vllm_importance_sampling_correction` (default True) — the
   correction our reference run used and our trainer initially omitted.
 
+## Update: TIS refuted; the real cause is an entropy/length runaway
+
+Rerunning with TIS blew up identically (entropy weight averaged 1.00003 — the
+vLLM/HF gap is negligible here). Two more hypotheses were then tested and
+refuted (keeping zero-variance groups; lowering temperature + raising KL — the
+latter blew up *faster*). Forensic analysis of all runs gives the real picture:
+
+- **It is an entropy-led runaway.** Entropy jumps first (~iter 52), *then* length
+  explodes (~iter 57), *then* reward degrades. The policy distribution diffuses;
+  the model still solves problems (reward ~0.66) well into the blow-up.
+- **Our run is under-regularized vs the stable TRL reference from the start.** In
+  the stable region (iters 10–50): policy entropy 2.2× TRL's (0.28 vs 0.13), raw
+  gradient norm 2.6× TRL's (2.29 vs 0.87), and **95% of our optimizer steps are
+  gradient-clip-saturated** (raw ~2.3 renormalized to 1.0); TRL's sit at ~0.87
+  and never clip. We over-step every step.
+- **It is recipe fragility, not model size.** TRL trains the *same* 0.5B model on
+  the *same* recipe stably to 100 iters, so 0.5B can be stable on GSM8K. Small
+  size only thins the stability margin.
+
+This "unhealthy increase in entropy and response length" is a documented GRPO
+pathology: DAPO (arXiv:2503.14476), the entropy mechanism (arXiv:2505.22617),
+and GTPO/GRPO-S (arXiv:2508.04349) all describe it and its fixes.
+
+## Stabilization package (`configs/g1_robust.yaml`)
+
+Every lever pulls the same way — smaller, better-anchored updates plus removal of
+the truncation destabilizer. Temperature is left at 0.9 (lowering it accelerated
+the blow-up; that result was confounded and is not repeated).
+
+| Lever | Change | Why |
+|---|---|---|
+| Learning rate | 2e-6 → 1e-6 | Reverts our own documented 2× deviation from the DeepScaleR reference; cuts the over-stepping (95% clip-saturated). |
+| Grad-norm clip | 1.0 → 0.5 | Caps the outlier spikes. |
+| KL coefficient | 0.001 → 0.003 | Gentle anchor to the low-entropy reference, directly opposing entropy increase (a 3× bump, not the confounded 10×). |
+| Truncation | `zero_reward` → `mask` | DAPO overlong filtering: truncated completions inform the group baseline but are excluded from the loss instead of being punished with reward 0. Breaks the length→truncation→punishment→destabilization feedback. |
+
+Things already correct (ruled out as causes): token-level loss (DAPO-recommended,
+no length bias in normalization — consistent with length not growing until *after*
+entropy); TIS is on but a near-no-op here. What remains unpinned is why *our* run
+diverges from TRL on the *identical* nominal recipe — every algorithmic component
+matches, so it is a subtle RNG/precision/normalization interaction near a
+bifurcation. The package widens the stable basin rather than matching TRL exactly.
+
 ## Validation status
 
 TIS is implemented, unit-tested (formula, PG-not-KL scaling, identity when
