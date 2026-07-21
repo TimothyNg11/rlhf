@@ -1,0 +1,12 @@
+inherit: g1_100.yaml
+run_name: g1_stable
+rollout:
+  # 0.9 drove the entropy explosion at ~iter 55 (documented in docs/g1_diagnosis.md
+  # and report/g1_overlay.png): too much sampling entropy for a 0.5B policy. 0.6 is
+  # the DeepScaleR value; the 0.9 bump was a documented deviation in the plan.
+  temperature: 0.6
+train:
+  # 0.001 barely anchors to the reference; 0.01 tightens it so the policy cannot
+  # drift into the high-entropy regime. Both levers act directly on the observed
+  # failure mode (entropy blow-up), unlike the two refuted implementation guesses.
+  kl_coef: 0.01
