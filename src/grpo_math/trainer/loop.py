@@ -39,6 +39,7 @@ from grpo_math.trainer.algo import (
     gather_logprobs_and_entropy,
     grpo_microbatch_loss,
     group_normalized_advantages,
+    truncated_is_weights,
 )
 from grpo_math.trainer.checkpoint import (
     find_latest_checkpoint,
@@ -149,6 +150,9 @@ class GRPOTrainer:
         #          answers most consistently. G1 (docs/PLAN.md, report/g1_overlay.png)
         #          traced our entropy blowup to exactly this difference.
         self.skip_zero_variance_groups = bool(train_cfg["skip_zero_variance_groups"])
+        # Truncated importance sampling for the rollout-vs-recompute mismatch.
+        self.use_tis = bool(train_cfg.get("use_tis", False))
+        self.tis_cap = float(train_cfg.get("tis_cap", 2.0))
         expected_holdout = BENCHMARKS["gsm8k_dev"].take_last
         assert cfg["data"]["dev_holdout"] == expected_holdout, (
             f"cfg data.dev_holdout ({cfg['data']['dev_holdout']}) must equal "
@@ -442,6 +446,8 @@ class GRPOTrainer:
             grad_norm = 0.0
             n_updates = 0
             sampler_recompute_logprob_diff = None
+            tis_weight_mean = None
+            tis_capped_frac = None
             n_completions = len(flat_kept)
 
             if kept_groups:
@@ -456,6 +462,8 @@ class GRPOTrainer:
                     grad_norm,
                     n_updates,
                     sampler_recompute_logprob_diff,
+                    tis_weight_mean,
+                    tis_capped_frac,
                 ) = self._train_on_kept(step, kept_groups, flat_kept, flat_adv)
 
             # 9. log train row ----------------------------------------------
@@ -486,6 +494,8 @@ class GRPOTrainer:
                     "n_zero_var_groups": n_zero_var_groups,
                     "n_updates": n_updates,
                     "sampler_recompute_logprob_diff": sampler_recompute_logprob_diff,
+                    "tis_weight_mean": tis_weight_mean,
+                    "tis_capped_frac": tis_capped_frac,
                     "gen_time_s": gen_time_s,
                     "train_time_s": train_time_s,
                     "step_time_s": step_time_s,
@@ -569,16 +579,34 @@ class GRPOTrainer:
         entropy_cat = torch.cat(entropy_list) if entropy_list else torch.zeros(0)
         entropy_mean = float(entropy_cat.mean().item()) if entropy_cat.numel() else 0.0
 
-        # Monitoring-only probe: how far the sampler's chosen-token logprobs
-        # drift from the recomputed old-logprobs.
+        # Per-token truncated-IS weights (min(exp(old_lp - sampling_lp), cap)),
+        # one tensor per kept sample aligned to its response tokens; also the
+        # monitoring probe (mean |sampler - recompute| drift). Samples whose
+        # rollout gave no sampler logprobs (or TIS disabled) fall back to weight
+        # 1 -> no correction, which is what the CPU fakes exercise.
+        tis_list: list[torch.Tensor] = []
         diff_sum = 0.0
         diff_count = 0
+        tis_sum = 0.0
+        tis_count = 0
+        tis_capped = 0
         for i, sample in enumerate(flat_kept):
+            if self.use_tis and sample.sampler_logprobs is not None:
+                sampling_lp = torch.tensor(sample.sampler_logprobs, dtype=torch.float32)
+                w = truncated_is_weights(old_lp[i], sampling_lp, cap=self.tis_cap)
+                tis_list.append(w)
+                tis_sum += float(w.sum().item())
+                tis_count += w.numel()
+                tis_capped += int((w >= self.tis_cap).sum().item())
+            else:
+                tis_list.append(torch.ones_like(old_lp[i]))
             if sample.sampler_logprobs is not None:
                 d = (torch.tensor(sample.sampler_logprobs, dtype=torch.float32) - old_lp[i]).abs()
                 diff_sum += float(d.sum().item())
                 diff_count += d.numel()
         sampler_recompute_logprob_diff = diff_sum / diff_count if diff_count else None
+        tis_weight_mean = tis_sum / tis_count if tis_count else None
+        tis_capped_frac = tis_capped / tis_count if tis_count else None
 
         # 7. permute kept groups, split into mini-batches of prompt-groups.
         perm = np.random.default_rng(train_cfg["seed"] * 999983 + step).permutation(len(kept_groups))
@@ -635,6 +663,9 @@ class GRPOTrainer:
                     [flat_adv[i] for i in micro_indices], dtype=torch.float32, device=self.device
                 )
                 resp_mask = batch.response_mask[:, 1:].to(self.device)
+                tis_packed = pack_response_values(
+                    [tis_list[i] for i in micro_indices], batch
+                ).to(self.device)
 
                 loss_out = grpo_microbatch_loss(
                     lp,
@@ -645,6 +676,7 @@ class GRPOTrainer:
                     clip_ratio=train_cfg["clip_ratio"],
                     kl_coef=train_cfg["kl_coef"],
                     global_token_count=global_token_count,
+                    tis_weight=tis_packed,
                 )
                 loss_out.loss.backward()
 
@@ -711,4 +743,6 @@ class GRPOTrainer:
             grad_norm,
             n_updates,
             sampler_recompute_logprob_diff,
+            tis_weight_mean,
+            tis_capped_frac,
         )

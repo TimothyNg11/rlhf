@@ -25,6 +25,14 @@ train:
   format_bonus: 0.2
   max_grad_norm: 1.0
   save_every: 80
+  # Truncated importance sampling: correct the rollout(vLLM)-vs-recompute(HF)
+  # distribution mismatch. Because old-logprobs are recomputed with HF (never
+  # the sampler), the PG ratio does NOT see the backend gap, so it must be
+  # corrected here or the off-policy bias compounds into an entropy blow-up
+  # (Yao et al. 2025; TRL's default vllm_importance_sampling_correction). G1
+  # traced our blow-up to its absence; cap is verl's typical 1.5-5.0 range.
+  use_tis: true
+  tis_cap: 2.0
 rollout:
   group_size: 4
   # 0.6 (the 1.5B recipe value) is too cold for exploration at 0.5B; deviation

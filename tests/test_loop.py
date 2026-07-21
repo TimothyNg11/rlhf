@@ -75,9 +75,12 @@ class FakeRollout:
     weight-sync handshake really passes end-to-end (unless ``corrupt_checksums``
     forces a mismatch)."""
 
-    def __init__(self, answers, *, corrupt_checksums=False):
+    def __init__(self, answers, *, corrupt_checksums=False, sampler_logprob=None):
         self.answers = answers
         self.corrupt_checksums = corrupt_checksums
+        # When set, every response token reports this constant sampler logprob,
+        # so the trainer's TIS path has non-None sampling_logprobs to work with.
+        self.sampler_logprob = sampler_logprob
         self.wake_calls = 0
         self.sleep_calls = 0
         self.sync_calls = 0
@@ -92,6 +95,11 @@ class FakeRollout:
                 text = texts[i % len(texts)]
                 prompt_token_ids = [1 + (hash(prompt) % 20)] * 3
                 response_token_ids = [2 + (i % 5)] * (4 + len(text) % 4)
+                sampler_logprobs = (
+                    None
+                    if self.sampler_logprob is None
+                    else [self.sampler_logprob] * len(response_token_ids)
+                )
                 group.append(
                     RolloutSample(
                         prompt_idx=prompt_idx,
@@ -99,7 +107,7 @@ class FakeRollout:
                         finish_reason="stop",
                         prompt_token_ids=prompt_token_ids,
                         response_token_ids=response_token_ids,
-                        sampler_logprobs=None,
+                        sampler_logprobs=sampler_logprobs,
                     )
                 )
             groups.append(group)
@@ -192,13 +200,17 @@ def _answers_with_eval(training_answers):
     return merged
 
 
-def _make_trainer(run_dir, problems, answers, cfg=None, *, corrupt_checksums=False, **kwargs):
+def _make_trainer(
+    run_dir, problems, answers, cfg=None, *, corrupt_checksums=False, sampler_logprob=None, **kwargs
+):
     if cfg is None:
         cfg = _make_cfg()
     torch.manual_seed(0)
     policy = TinyPolicy()
     ref_policy = TinyPolicy()
-    rollout = FakeRollout(answers, corrupt_checksums=corrupt_checksums)
+    rollout = FakeRollout(
+        answers, corrupt_checksums=corrupt_checksums, sampler_logprob=sampler_logprob
+    )
     trainer = GRPOTrainer(
         cfg,
         run_dir,
@@ -248,8 +260,8 @@ def test_three_steps_write_train_metrics_rows(tmp_path):
         "parse_rate", "frac_truncated", "response_len_mean", "response_len_p90",
         "entropy_mean", "kl_mean", "ratio_mean", "ratio_max", "clip_frac",
         "pg_loss", "loss", "grad_norm", "lr", "n_completions", "n_zero_var_groups",
-        "n_updates", "sampler_recompute_logprob_diff", "gen_time_s", "train_time_s",
-        "step_time_s",
+        "n_updates", "sampler_recompute_logprob_diff", "tis_weight_mean",
+        "tis_capped_frac", "gen_time_s", "train_time_s", "step_time_s",
     }
     for row in rows:
         assert expected_keys <= row.keys()
@@ -342,6 +354,37 @@ def test_all_zero_variance_still_updates_when_keeping(tmp_path):
     assert row["n_updates"] == 2  # vs 0 on the dropping path
     assert row["pg_loss"] == 0.0  # advantages all exactly 0 -> no PG signal
     assert row["kl_mean"] > 0.0  # KL is what remains, and it is what trains
+
+
+def test_tis_engages_when_sampler_logprobs_present(tmp_path):
+    # With sampler logprobs supplied and use_tis on, the trainer reports a
+    # non-None mean TIS weight; with the flag off it stays None even though the
+    # sampler logprobs are still there.
+    cfg = _make_cfg()
+    cfg["max_steps"] = 1
+    cfg["train"]["use_tis"] = True
+    cfg["train"]["tis_cap"] = 2.0
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()),
+        cfg=cfg, sampler_logprob=-1.0,
+    )
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    assert row["tis_weight_mean"] is not None
+    assert row["tis_capped_frac"] is not None
+    assert 0.0 < row["tis_weight_mean"] <= cfg["train"]["tis_cap"]
+
+
+def test_tis_none_when_disabled(tmp_path):
+    cfg = _make_cfg()
+    cfg["max_steps"] = 1
+    cfg["train"]["use_tis"] = False
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()),
+        cfg=cfg, sampler_logprob=-1.0,
+    )
+    trainer.train()
+    assert _train_rows(tmp_path)[0]["tis_weight_mean"] is None
 
 
 def test_step0_assertions_run_and_pass(tmp_path):

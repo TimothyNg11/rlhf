@@ -17,6 +17,7 @@ from grpo_math.trainer.algo import (
     grpo_microbatch_loss,
     group_normalized_advantages,
     low_var_kl,
+    truncated_is_weights,
 )
 
 
@@ -198,6 +199,54 @@ def test_clip_loss_golden():
     assert out.n_tokens == 2
     # |ratio - 1| is 0.5 for both tokens -> p99 of that two-value set is 0.5.
     assert out.ratio_abs_dev_p99 == pytest.approx(0.5)
+
+
+def test_truncated_is_weights_golden():
+    # old_lp - sampling_lp = [log2, 0, -log4] -> exp = [2, 1, 0.25]; cap 1.5
+    # -> min: [1.5, 1.0, 0.25]. One-sided: only the >cap entry is clamped.
+    old = torch.tensor([math.log(2.0), 0.0, math.log(0.25)])
+    sampling = torch.zeros(3)
+    w = truncated_is_weights(old, sampling, cap=1.5)
+    assert torch.allclose(w, torch.tensor([1.5, 1.0, 0.25]))
+
+
+def test_truncated_is_weights_identity_when_equal():
+    lp = torch.tensor([0.3, -1.2, 2.0])
+    w = truncated_is_weights(lp, lp.clone(), cap=2.0)
+    assert torch.allclose(w, torch.ones(3))
+
+
+def test_tis_weight_scales_pg_not_kl():
+    # ratio=1 (lp==old_lp) so pg = -A per token; with A=+1, pg=-1. tis weight 0.5
+    # -> pg contribution halves to -0.5, but the KL term is NOT scaled.
+    lp = torch.zeros(1, 1)
+    old = torch.zeros(1, 1)
+    ref = torch.full((1, 1), -1.0)  # nonzero KL
+    adv = torch.tensor([1.0])
+    mask = torch.ones(1, 1, dtype=torch.bool)
+    kl_coef = 0.1
+    tis = torch.full((1, 1), 0.5)
+
+    base = grpo_microbatch_loss(lp, old, ref, adv, mask, clip_ratio=0.2, kl_coef=kl_coef,
+                                global_token_count=1)
+    scaled = grpo_microbatch_loss(lp, old, ref, adv, mask, clip_ratio=0.2, kl_coef=kl_coef,
+                                  global_token_count=1, tis_weight=tis)
+    kl_term = kl_coef * (math.exp(-1.0) - (-1.0) - 1.0)  # k3 at ref-lp=-1
+    assert base.loss.item() == pytest.approx(-1.0 + kl_term)
+    assert scaled.loss.item() == pytest.approx(0.5 * -1.0 + kl_term)  # pg halved, KL intact
+
+
+def test_tis_weight_none_is_identity():
+    torch.manual_seed(3)
+    lp = torch.randn(2, 3)
+    old = torch.randn(2, 3)
+    ref = torch.randn(2, 3)
+    adv = torch.tensor([0.5, -0.5])
+    mask = torch.ones(2, 3, dtype=torch.bool)
+    kw = dict(clip_ratio=0.2, kl_coef=0.1, global_token_count=6)
+    none_out = grpo_microbatch_loss(lp, old, ref, adv, mask, **kw)
+    ones_out = grpo_microbatch_loss(lp, old, ref, adv, mask, tis_weight=torch.ones(2, 3), **kw)
+    assert none_out.loss.item() == pytest.approx(ones_out.loss.item())
 
 
 def test_clip_not_binding_inside_band():
