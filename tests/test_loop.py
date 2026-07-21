@@ -75,12 +75,15 @@ class FakeRollout:
     weight-sync handshake really passes end-to-end (unless ``corrupt_checksums``
     forces a mismatch)."""
 
-    def __init__(self, answers, *, corrupt_checksums=False, sampler_logprob=None):
+    def __init__(self, answers, *, corrupt_checksums=False, sampler_logprob=None,
+                 truncated_prompts=()):
         self.answers = answers
         self.corrupt_checksums = corrupt_checksums
         # When set, every response token reports this constant sampler logprob,
         # so the trainer's TIS path has non-None sampling_logprobs to work with.
         self.sampler_logprob = sampler_logprob
+        # Prompts whose completions all report finish_reason "length" (truncated).
+        self.truncated_prompts = set(truncated_prompts)
         self.wake_calls = 0
         self.sleep_calls = 0
         self.sync_calls = 0
@@ -104,7 +107,7 @@ class FakeRollout:
                     RolloutSample(
                         prompt_idx=prompt_idx,
                         text=text,
-                        finish_reason="stop",
+                        finish_reason="length" if prompt in self.truncated_prompts else "stop",
                         prompt_token_ids=prompt_token_ids,
                         response_token_ids=response_token_ids,
                         sampler_logprobs=sampler_logprobs,
@@ -201,7 +204,8 @@ def _answers_with_eval(training_answers):
 
 
 def _make_trainer(
-    run_dir, problems, answers, cfg=None, *, corrupt_checksums=False, sampler_logprob=None, **kwargs
+    run_dir, problems, answers, cfg=None, *, corrupt_checksums=False, sampler_logprob=None,
+    truncated_prompts=(), **kwargs
 ):
     if cfg is None:
         cfg = _make_cfg()
@@ -209,7 +213,8 @@ def _make_trainer(
     policy = TinyPolicy()
     ref_policy = TinyPolicy()
     rollout = FakeRollout(
-        answers, corrupt_checksums=corrupt_checksums, sampler_logprob=sampler_logprob
+        answers, corrupt_checksums=corrupt_checksums, sampler_logprob=sampler_logprob,
+        truncated_prompts=truncated_prompts,
     )
     trainer = GRPOTrainer(
         cfg,
@@ -260,8 +265,8 @@ def test_three_steps_write_train_metrics_rows(tmp_path):
         "parse_rate", "frac_truncated", "response_len_mean", "response_len_p90",
         "entropy_mean", "kl_mean", "ratio_mean", "ratio_max", "clip_frac",
         "pg_loss", "loss", "grad_norm", "lr", "n_completions", "n_zero_var_groups",
-        "n_updates", "sampler_recompute_logprob_diff", "tis_weight_mean",
-        "tis_capped_frac", "gen_time_s", "train_time_s", "step_time_s",
+        "n_masked_truncated", "n_updates", "sampler_recompute_logprob_diff",
+        "tis_weight_mean", "tis_capped_frac", "gen_time_s", "train_time_s", "step_time_s",
     }
     for row in rows:
         assert expected_keys <= row.keys()
@@ -385,6 +390,47 @@ def test_tis_none_when_disabled(tmp_path):
     )
     trainer.train()
     assert _train_rows(tmp_path)[0]["tis_weight_mean"] is None
+
+
+def test_truncation_mask_excludes_from_training(tmp_path):
+    # In 'mask' mode a truncated completion still gets reward 0 (informing the
+    # group baseline) but is dropped from the training batch. Q1's completions
+    # are truncated -> that whole group is fully masked -> excluded.
+    cfg = _make_cfg()
+    cfg["max_steps"] = 1
+    cfg["train"]["truncation_mode"] = "mask"
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()),
+        cfg=cfg, truncated_prompts=["Q1"],
+    )
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    assert row["n_masked_truncated"] == 2  # Q1's G=2 completions both truncated
+    assert row["n_completions"] == (4 - 1) * 2  # Q1's group fully masked out
+
+
+def test_truncation_zero_reward_still_trains_on_truncated(tmp_path):
+    # Default zero_reward mode: truncated completions are NOT masked (masked=False),
+    # so they stay in the training batch and n_masked_truncated is 0.
+    cfg = _make_cfg()
+    cfg["max_steps"] = 1
+    cfg["train"]["truncation_mode"] = "zero_reward"
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()),
+        cfg=cfg, truncated_prompts=["Q1"],
+    )
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    assert row["n_masked_truncated"] == 0
+    assert row["frac_truncated"] > 0.0  # they ARE counted as truncated in stats
+
+
+def test_invalid_truncation_mode_rejected(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["truncation_mode"] = "bogus"
+    with pytest.raises(AssertionError, match="truncation_mode"):
+        _make_trainer(tmp_path, _training_problems(),
+                      _answers_with_eval(_variance_answers()), cfg=cfg)
 
 
 def test_step0_assertions_run_and_pass(tmp_path):

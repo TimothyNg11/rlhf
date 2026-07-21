@@ -1,0 +1,21 @@
+inherit: g1_100.yaml
+run_name: g1_robust
+# Stabilization package for the entropy/length runaway diagnosed in
+# docs/g1_diagnosis.md. Every lever pulls the same way -- smaller, better-
+# anchored updates plus removal of the truncation destabilizer -- and the
+# temperature is deliberately LEFT at 0.9 (lowering it to 0.6 accelerated the
+# blowup, a confounded result we do not repeat). Evidence: forensics showed our
+# run over-steps vs the stable TRL reference (raw grad 2.6x, 95% clip-saturated,
+# entropy 2.2x) before entropy runs away and drags length with it.
+train:
+  # Revert our own documented 2x deviation from the DeepScaleR reference (1e-6):
+  # reduces the systematic over-stepping.
+  lr: 1.0e-6
+  # Cap the outlier spikes: 95% of steps were saturating the 1.0 clip.
+  max_grad_norm: 0.5
+  # Gentle 3x anchor toward the (low-entropy) reference, directly opposing the
+  # entropy runaway. NOT the 10x that was confounded with the temp change.
+  kl_coef: 0.003
+  # DAPO overlong filtering: exclude truncated completions from the loss instead
+  # of punishing their cut-off reasoning with reward 0.
+  truncation_mode: mask

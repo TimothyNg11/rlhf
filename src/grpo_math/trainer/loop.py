@@ -137,10 +137,17 @@ class GRPOTrainer:
             "this trainer requires train.entropy_coef == 0.0 (entropy is logged "
             f"as a metric but never added to the loss); got {train_cfg['entropy_coef']!r}"
         )
-        assert train_cfg["truncation_mode"] == "zero_reward", (
-            "this trainer version only supports train.truncation_mode == "
-            "'zero_reward'; the rewards module also supports 'mask' but this "
-            f"trainer does not implement it. got {train_cfg['truncation_mode']!r}"
+        # zero_reward: truncated completions get reward 0 and ARE trained on
+        #   (pushed down like any wrong answer). mask: truncated completions are
+        #   EXCLUDED from the training loss ("overlong filtering", DAPO,
+        #   arXiv:2503.14476) -- their reward still informs the group baseline,
+        #   but their (cut-off, possibly-valid) reasoning is not punished. This
+        #   breaks the length -> truncation -> punishment -> destabilization
+        #   feedback that amplifies the entropy runaway (docs/g1_diagnosis.md).
+        self.truncation_mode = train_cfg["truncation_mode"]
+        assert self.truncation_mode in ("zero_reward", "mask"), (
+            "train.truncation_mode must be 'zero_reward' or 'mask'; "
+            f"got {self.truncation_mode!r}"
         )
         # True  -> zero-variance groups leave the batch entirely (their tokens
         #          contribute no PG term, no KL term, and no denominator mass).
@@ -389,23 +396,27 @@ class GRPOTrainer:
             all_parseable: list[bool] = []
             all_truncated: list[bool] = []
             all_resp_len: list[int] = []
+            masked_rows: list[list[bool]] = []  # per completion: excluded from training loss?
             for group_idx, group in enumerate(groups):
                 gold = golds[group_idx]
                 row = []
+                masked_row = []
                 for sample in group:
                     result = compute_reward(
                         sample.text,
                         gold,
                         truncated=(sample.finish_reason == "length"),
-                        truncation_mode="zero_reward",
+                        truncation_mode=self.truncation_mode,
                         format_bonus=train_cfg["format_bonus"],
                     )
                     row.append(result.reward)
+                    masked_row.append(result.masked)
                     all_rewards.append(result.reward)
                     all_parseable.append(result.parseable)
                     all_truncated.append(sample.finish_reason == "length")
                     all_resp_len.append(len(sample.response_token_ids))
                 reward_rows.append(row)
+                masked_rows.append(masked_row)
 
             reward_mean = float(np.mean(all_rewards))
             frac_correct = float(np.mean([r == 1.0 for r in all_rewards]))
@@ -419,6 +430,11 @@ class GRPOTrainer:
             advantages, keep_mask = group_normalized_advantages(rewards_t)
             n_zero_var_groups = int((~keep_mask).sum().item())
 
+            # Advantages were computed over the FULL group (masked completions'
+            # rewards still inform the group baseline); masked completions are
+            # then dropped from the training batch below.
+            n_masked_truncated = int(sum(sum(mr) for mr in masked_rows))
+
             kept_groups: list[list[int]] = []  # each: flat indices into flat_kept
             flat_kept = []  # RolloutSamples of groups in the training batch
             flat_adv: list[float] = []
@@ -430,10 +446,13 @@ class GRPOTrainer:
                     continue
                 group_indices = []
                 for sample_idx, sample in enumerate(group):
+                    if masked_rows[group_idx][sample_idx]:
+                        continue  # truncation_mode 'mask': not trained on
                     flat_kept.append(sample)
                     flat_adv.append(float(advantages[group_idx, sample_idx].item()))
                     group_indices.append(len(flat_kept) - 1)
-                kept_groups.append(group_indices)
+                if group_indices:  # a fully-masked group contributes nothing
+                    kept_groups.append(group_indices)
 
             # training-derived metrics default to the all-dropped case
             entropy_mean = None
@@ -492,6 +511,7 @@ class GRPOTrainer:
                     "lr": train_cfg["lr"],
                     "n_completions": n_completions,
                     "n_zero_var_groups": n_zero_var_groups,
+                    "n_masked_truncated": n_masked_truncated,
                     "n_updates": n_updates,
                     "sampler_recompute_logprob_diff": sampler_recompute_logprob_diff,
                     "tis_weight_mean": tis_weight_mean,
