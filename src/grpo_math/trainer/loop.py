@@ -21,6 +21,7 @@ with injected fakes -- imports fine in the vllm/transformers-free dev venv.
 from __future__ import annotations
 
 import contextlib
+import math
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -235,8 +236,19 @@ class GRPOTrainer:
         self.sampler = PromptSampler(
             len(problems), train_cfg["prompts_per_step"], seed=train_cfg["seed"]
         )
+        # Learning-rate schedule. "constant" keeps train.lr the whole way;
+        # "cosine" decays from train.lr to train.lr * min_lr_ratio over max_steps
+        # -- the standard fix for late-run drift (updates shrink exactly as the
+        # divergence risk grows; docs/g1_diagnosis.md showed our entropy/KL creep
+        # accelerating past iter ~80).
+        self.base_lr = train_cfg["lr"]
+        self.lr_schedule = train_cfg.get("lr_schedule", "constant")
+        self.min_lr_ratio = float(train_cfg.get("min_lr_ratio", 0.1))
+        assert self.lr_schedule in ("constant", "cosine"), (
+            f"train.lr_schedule must be 'constant' or 'cosine'; got {self.lr_schedule!r}"
+        )
         self.optimizer = torch.optim.AdamW(
-            policy.model.parameters(), lr=train_cfg["lr"], weight_decay=0.0
+            policy.model.parameters(), lr=self.base_lr, weight_decay=0.0
         )
 
         # A `resume=True` request with no checkpoint on disk yet (e.g. the very
@@ -292,6 +304,15 @@ class GRPOTrainer:
             self.policy.model.load_state_dict(
                 torch.load(model_pt, weights_only=False, map_location="cpu")
             )
+
+    def _current_lr(self, step: int) -> float:
+        """LR for training iteration ``step`` (0-indexed). Constant, or a cosine
+        decay from ``base_lr`` to ``base_lr * min_lr_ratio`` over ``max_steps``."""
+        if self.lr_schedule == "constant" or self.max_steps <= 1:
+            return self.base_lr
+        frac = min(step, self.max_steps - 1) / (self.max_steps - 1)
+        cos = 0.5 * (1.0 + math.cos(math.pi * frac))  # 1 -> 0
+        return self.base_lr * (self.min_lr_ratio + (1.0 - self.min_lr_ratio) * cos)
 
     def _training_autocast(self):
         """bf16 autocast context on non-CPU devices, no-op on CPU -- mirrors
@@ -510,7 +531,7 @@ class GRPOTrainer:
                     "pg_loss": pg_loss,
                     "loss": loss_total,
                     "grad_norm": grad_norm,
-                    "lr": train_cfg["lr"],
+                    "lr": self._current_lr(step),
                     "n_completions": n_completions,
                     "n_zero_var_groups": n_zero_var_groups,
                     "n_masked_truncated": n_masked_truncated,
@@ -602,6 +623,11 @@ class GRPOTrainer:
         train_cfg = self.cfg["train"]
         micro = train_cfg["micro_batch_size"]
         ppo_mini = train_cfg["ppo_mini_batch_size"]
+
+        # Apply this iteration's scheduled learning rate to the optimizer.
+        current_lr = self._current_lr(step)
+        for group in self.optimizer.param_groups:
+            group["lr"] = current_lr
 
         # 6. no-grad old/ref sweep (old-logprobs recomputed here, NOT taken
         #    from the sampler).

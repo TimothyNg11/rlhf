@@ -4,6 +4,7 @@ for pack_response_values.
 """
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -436,6 +437,47 @@ def test_invalid_truncation_mode_rejected(tmp_path):
     with pytest.raises(AssertionError, match="truncation_mode"):
         _make_trainer(tmp_path, _training_problems(),
                       _answers_with_eval(_variance_answers()), cfg=cfg)
+
+
+def test_lr_schedule_constant(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["lr_schedule"] = "constant"
+    cfg["train"]["lr"] = 2e-6
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+    )
+    assert trainer._current_lr(0) == 2e-6
+    assert trainer._current_lr(cfg["max_steps"] - 1) == 2e-6
+
+
+def test_lr_schedule_cosine_decays_to_floor(tmp_path):
+    cfg = _make_cfg()
+    cfg["max_steps"] = 100
+    cfg["train"]["lr_schedule"] = "cosine"
+    cfg["train"]["lr"] = 1e-6
+    cfg["train"]["min_lr_ratio"] = 0.1
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+    )
+    assert trainer._current_lr(0) == pytest.approx(1e-6)  # starts at peak
+    assert trainer._current_lr(99) == pytest.approx(0.1e-6)  # ends at floor
+    mid = trainer._current_lr(50)
+    assert 0.1e-6 < mid < 1e-6  # monotonically between
+    # cosine midpoint (frac ~0.5) is ~ floor + 0.9*peak*0.5 = 0.55*peak
+    assert mid == pytest.approx(1e-6 * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * 50 / 99))))
+
+
+def test_lr_schedule_logged_in_metrics(tmp_path):
+    cfg = _make_cfg()
+    cfg["max_steps"] = 3
+    cfg["train"]["lr_schedule"] = "cosine"
+    cfg["train"]["lr"] = 1e-6
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+    )
+    trainer.train()
+    lrs = [r["lr"] for r in _train_rows(tmp_path)]
+    assert lrs[0] > lrs[-1]  # decaying across the run
 
 
 def test_entropy_stop_loss_aborts_early(tmp_path):

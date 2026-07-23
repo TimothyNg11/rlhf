@@ -1,12 +1,18 @@
 inherit: g1_robust.yaml
 run_name: headline_robust
-# The W4 headline run: the stabilized g1_robust recipe (lr 1e-6, KL 0.003,
-# truncation mask, entropy stop-loss) extended to the full 400 steps. The
-# plan's original binding recipe (2e-6 / KL 0.001 / zero_reward) is superseded
-# because it triggers the entropy runaway (docs/g1_diagnosis.md); this recipe
-# trained stably to 100 steps with dev pass@1 57.6% -> 63.6%.
-#
-# save_every 80 (from base) => checkpoints at 80/160/240/320/400, exactly the
-# 5 the final eval sweep needs. The entropy stop-loss (2.0) guards the longer
-# horizon; watch for the mild late-run entropy creep seen at 100 steps.
+# The W4 headline run: the stabilized g1_robust recipe extended to 400 steps,
+# with two additions that the 100-step stability diagnosis showed are needed for
+# the longer horizon (docs/g1_diagnosis.md). The 100-step run was stable through
+# iter ~70 but its entropy/KL creep was ACCELERATING (super-linear) by iter 100,
+# extrapolating to cross the stop-loss around iter ~200-250. So:
+#   - lr_schedule cosine: decay lr from 1e-6 to 1e-6*0.1 over the 400 steps, the
+#     standard fix for late-run drift -- updates shrink exactly as the divergence
+#     risk grows, while the productive early phase keeps ~full lr.
+#   - kl_coef 0.006: a modest 2x bump to the reference anchor.
+# The entropy stop-loss (2.0) still guards the downside; save_every 80 gives
+# checkpoints at 80/160/240/320/400 for the final eval sweep.
 max_steps: 400
+train:
+  lr_schedule: cosine
+  min_lr_ratio: 0.1
+  kl_coef: 0.006
