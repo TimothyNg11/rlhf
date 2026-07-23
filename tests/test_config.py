@@ -127,3 +127,22 @@ def test_eval_config_has_its_own_required_keys():
 
 def test_configs_dir_is_nonempty():
     assert list(CONFIGS_DIR.glob("*.yaml"))
+
+
+def test_ablation_kl_off_resolves_reparented_onto_g1_robust():
+    cfg = load_config(CONFIGS_DIR / "ablation_kl_off.yaml")
+    assert cfg["train"]["kl_coef"] == 0.0
+    assert cfg["train"]["lr"] == 1.0e-6
+    assert cfg["train"]["truncation_mode"] == "mask"
+    assert cfg["max_steps"] == 100
+    assert cfg["rollout"]["group_size"] == 4
+
+
+def test_ablation_g8_resolves_reparented_onto_g1_robust():
+    cfg = load_config(CONFIGS_DIR / "ablation_g8.yaml")
+    assert cfg["rollout"]["group_size"] == 8
+    assert cfg["train"]["prompts_per_step"] == 32
+    assert cfg["train"]["ppo_mini_batch_size"] == 16
+    assert cfg["train"]["lr"] == 1.0e-6
+    assert cfg["train"]["kl_coef"] == 0.003
+    assert cfg["train"]["truncation_mode"] == "mask"

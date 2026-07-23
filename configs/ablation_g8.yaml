@@ -1,6 +1,7 @@
-inherit: headline_gsm8k.yaml
+inherit: g1_robust.yaml
 run_name: ablation_g8
 rollout:
   group_size: 8
 train:
-  prompts_per_step: 32   # 32x8 = 256 completions/step, compute-matched to headline 64x4
+  prompts_per_step: 32     # 32x8 = 256 completions/step, compute-matched to the 64x4 baseline
+  ppo_mini_batch_size: 16  # keep 2 updates/iter at 128 completions/update (matches baseline)
