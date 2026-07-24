@@ -219,6 +219,98 @@ def test_cli_smoke_run_eval_main(tmp_path):
     assert (out_dir / "tiny_math" / "summary.md").exists()
 
 
+# --- dual grading (strict + lenient) -------------------------------------------
+
+
+def test_records_carry_lenient_fields(tmp_path):
+    _run(tmp_path)
+    records = _read_samples(tmp_path / "tiny_math" / "samples.jsonl.gz")
+    for r in records:
+        assert "verdict_lenient" in r
+        assert "extracted_lenient" in r
+        assert "extraction_method" in r
+    # existing strict-meaning fields are untouched
+    for r in records:
+        assert "verdict" in r
+        assert "extracted" in r
+
+
+def test_extraction_method_and_lenient_verdict_recorded(tmp_path):
+    _run(tmp_path)
+    records = _read_samples(tmp_path / "tiny_math" / "samples.jsonl.gz")
+    tm2 = next(r for r in records if r["problem_id"] == "tm_2" and r["sample_idx"] == 0)
+    assert tm2["extraction_method"] == "boxed"
+    assert tm2["extracted_lenient"] == "7"
+    assert tm2["verdict_lenient"] == 1.0
+
+
+def test_pass_at_k_values_on_boxed_only_script(tmp_path):
+    summary = _run(tmp_path)
+    # any-correct per problem: tm1(sample0 correct), tm2(both correct),
+    # tm3(both wrong), tm4(sample0 correct, sample1 truncated->0),
+    # tm5(sample1 correct), tm6(both unparseable) -> 4/6 pass.
+    assert summary.pass_at_k == pytest.approx(4 / 6)
+    # this script never diverges strict vs lenient (boxed or unparseable-with-
+    # no-digits only), so lenient pass@k matches strict exactly.
+    assert summary.pass_at_k_lenient == pytest.approx(summary.pass_at_k)
+
+
+def test_pass_at_k_lenient_rescues_unboxed_correct(tmp_path):
+    problems = load_benchmark("tiny_math")
+    by_id = {p.problem_id: p for p in problems}
+    script = {
+        by_id["tm_1"].prompt: ["no boxed here", "The final answer is 4."],
+        by_id["tm_2"].prompt: ["\\boxed{7}", "\\boxed{7}"],
+        by_id["tm_3"].prompt: ["\\boxed{31}", "\\boxed{29}"],
+        by_id["tm_4"].prompt: ["\\boxed{\\frac{3}{4}}", "\\boxed{\\frac{3}{4}}"],
+        by_id["tm_5"].prompt: ["no boxed answer here", "\\boxed{49}"],
+        by_id["tm_6"].prompt: ["still no box", "nor here either"],
+    }
+    backend = FakeBackend(script)
+    summary = run_eval("tiny_math", backend, EVAL_CFG, out_dir=tmp_path, model_name="m")
+
+    # tm_1 has no strict-correct sample (both unboxed) -> fails strict pass@k,
+    # but sample 1 ("The final answer is 4.") is lenient-rescued -> passes lenient pass@k.
+    assert summary.pass_at_k < summary.pass_at_k_lenient
+
+
+def test_lenient_parse_rate_field(tmp_path):
+    summary = _run(tmp_path)
+    assert 0.0 <= summary.lenient_parse_rate <= 1.0
+    # lenient parsing is at least as permissive as strict (boxed-only) parsing.
+    assert summary.lenient_parse_rate >= summary.parse_rate
+
+
+def test_summary_md_includes_lenient_numbers(tmp_path):
+    summary = _run(tmp_path)
+    text = (tmp_path / "tiny_math" / "summary.md").read_text(encoding="utf-8")
+    assert f"{summary.pass_at_1_lenient:.4f}" in text
+    assert f"{summary.pass_at_k:.4f}" in text
+    assert f"{summary.pass_at_k_lenient:.4f}" in text
+    assert f"{summary.lenient_parse_rate:.4f}" in text
+
+
+def test_load_summary_roundtrips_old_format_missing_lenient_fields(tmp_path):
+    _run(tmp_path)
+    data = json.loads((tmp_path / "tiny_math" / "summary.json").read_text(encoding="utf-8"))
+    for key in (
+        "pass_at_1_lenient", "ci_lo_lenient", "ci_hi_lenient",
+        "pass_at_k", "pass_at_k_lenient", "lenient_parse_rate",
+    ):
+        data.pop(key, None)
+    old_path = tmp_path / "old_summary.json"
+    old_path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_summary(old_path)
+    assert loaded.pass_at_1_lenient is None
+    assert loaded.ci_lo_lenient is None
+    assert loaded.ci_hi_lenient is None
+    assert loaded.pass_at_k is None
+    assert loaded.pass_at_k_lenient is None
+    assert loaded.lenient_parse_rate is None
+    assert loaded.pass_at_1 == pytest.approx(data["pass_at_1"])  # existing fields unaffected
+
+
 def test_cli_fake_backend_requires_fake_script(tmp_path):
     run_eval_cli = _load_script_module("run_eval_cli2", "run_eval.py")
     with pytest.raises(SystemExit):

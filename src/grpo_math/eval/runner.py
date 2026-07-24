@@ -19,8 +19,9 @@ import numpy as np
 
 from grpo_math.eval.backends import GenerationBackend
 from grpo_math.eval.benchmarks import load_benchmark
-from grpo_math.rewards import compute_reward, extract_boxed
-from grpo_math.stats import bootstrap_ci, pass_at_1, per_problem_means
+from grpo_math.rewards import RewardResult, compute_reward, extract_boxed
+from grpo_math.rewards.extraction import LenientExtraction, extract_lenient
+from grpo_math.stats import bootstrap_ci, pass_at_1, pass_at_k_any, per_problem_means
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,34 @@ class EvalSummary:
     mean_completion_tokens: float
     timestamp: str  # UTC ISO 8601
     git_describe: str | None
+    # Appended fields (all default None so an old summary.json -- written
+    # before dual strict/lenient grading existed -- still round-trips through
+    # load_summary): existing `pass_at_1`/`ci_lo`/`ci_hi`/`parse_rate` keep
+    # their original (strict, boxed-only) meaning.
+    pass_at_1_lenient: float | None = None
+    ci_lo_lenient: float | None = None
+    ci_hi_lenient: float | None = None
+    pass_at_k: float | None = None
+    pass_at_k_lenient: float | None = None
+    lenient_parse_rate: float | None = None
+
+
+def grade_dual(completion: str, gold: str, truncated: bool) -> tuple[RewardResult, RewardResult, LenientExtraction]:
+    """Grade one completion strict AND lenient (``format_bonus=0.0``, eval semantics).
+
+    When the lenient extraction chain's method is ``"boxed"`` it found the
+    exact same string :func:`grpo_math.rewards.extract_boxed` would, so the
+    lenient result is IDENTICAL to the strict one -- reused here rather than
+    re-verified, since math-verify's ``verify()`` call is the expensive part
+    of grading. Returns ``(strict_result, lenient_result, lenient_extraction)``.
+    """
+    strict_result = compute_reward(completion, gold, truncated=truncated, extraction_mode="boxed")
+    lenient_extraction = extract_lenient(completion)
+    if lenient_extraction.method == "boxed":
+        lenient_result = strict_result
+    else:
+        lenient_result = compute_reward(completion, gold, truncated=truncated, extraction_mode="lenient")
+    return strict_result, lenient_result, lenient_extraction
 
 
 def _git_describe() -> str | None:
@@ -84,20 +113,27 @@ def run_eval(
 
     n_problems = len(problems)
     verdicts = np.zeros((n_problems, k))
+    lenient_verdicts = np.zeros((n_problems, k))
     records = []
     n_parseable = 0
+    n_parseable_lenient = 0
     n_truncated = 0
     total_tokens = 0
 
     for pi, (problem, sample_completions) in enumerate(zip(problems, completions)):
         for si, comp in enumerate(sample_completions):
             truncated = comp.finish_reason == "length"
-            result = compute_reward(comp.text, problem.gold, truncated=truncated)
+            strict_result, lenient_result, lenient_extraction = grade_dual(
+                comp.text, problem.gold, truncated
+            )
             extracted = extract_boxed(comp.text)
 
-            verdicts[pi, si] = result.reward
-            if result.parseable:
+            verdicts[pi, si] = strict_result.reward
+            lenient_verdicts[pi, si] = lenient_result.reward
+            if strict_result.parseable:
                 n_parseable += 1
+            if lenient_result.parseable:
+                n_parseable_lenient += 1
             if truncated:
                 n_truncated += 1
             total_tokens += comp.n_tokens
@@ -111,13 +147,17 @@ def run_eval(
                     "n_tokens": comp.n_tokens,
                     "extracted": extracted,
                     "gold": problem.gold,
-                    "verdict": result.reward,
-                    "parseable": result.parseable,
+                    "verdict": strict_result.reward,
+                    "parseable": strict_result.parseable,
+                    "verdict_lenient": lenient_result.reward,
+                    "extracted_lenient": lenient_extraction.value,
+                    "extraction_method": lenient_extraction.method,
                 }
             )
 
     total_samples = n_problems * k
     per_problem = per_problem_means(verdicts)
+    per_problem_lenient = per_problem_means(lenient_verdicts)
 
     bench_dir = Path(out_dir) / benchmark
     bench_dir.mkdir(parents=True, exist_ok=True)
@@ -127,6 +167,7 @@ def run_eval(
             f.write(json.dumps(record) + "\n")
 
     ci_lo, ci_hi = bootstrap_ci(per_problem, seed=seed)
+    ci_lo_lenient, ci_hi_lenient = bootstrap_ci(per_problem_lenient, seed=seed)
     summary = EvalSummary(
         benchmark=benchmark,
         model_name=model_name,
@@ -144,6 +185,12 @@ def run_eval(
         mean_completion_tokens=total_tokens / total_samples if total_samples else 0.0,
         timestamp=datetime.now(timezone.utc).isoformat(),
         git_describe=_git_describe(),
+        pass_at_1_lenient=pass_at_1(lenient_verdicts),
+        ci_lo_lenient=ci_lo_lenient,
+        ci_hi_lenient=ci_hi_lenient,
+        pass_at_k=pass_at_k_any(verdicts),
+        pass_at_k_lenient=pass_at_k_any(lenient_verdicts),
+        lenient_parse_rate=n_parseable_lenient / total_samples if total_samples else 0.0,
     )
 
     (bench_dir / "summary.json").write_text(json.dumps(asdict(summary), indent=2), encoding="utf-8")
@@ -154,14 +201,20 @@ def run_eval(
 
 def _render_markdown(summary: EvalSummary) -> str:
     header = (
-        "| benchmark | model | k | pass@1 | 95% CI | parse_rate | truncation_rate "
-        "| mean_tokens | n_problems | timestamp |\n"
-        "|---|---|---|---|---|---|---|---|---|---|\n"
+        "| benchmark | model | k | pass@1 | 95% CI | parse_rate "
+        "| pass@1_lenient | 95% CI (lenient) | lenient_parse_rate "
+        "| pass@k | pass@k_lenient "
+        "| truncation_rate | mean_tokens | n_problems | timestamp |\n"
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
     )
     row = (
         f"| {summary.benchmark} | {summary.model_name} | {summary.k} "
         f"| {summary.pass_at_1:.4f} | [{summary.ci_lo:.4f}, {summary.ci_hi:.4f}] "
-        f"| {summary.parse_rate:.4f} | {summary.truncation_rate:.4f} "
+        f"| {summary.parse_rate:.4f} "
+        f"| {summary.pass_at_1_lenient:.4f} | [{summary.ci_lo_lenient:.4f}, {summary.ci_hi_lenient:.4f}] "
+        f"| {summary.lenient_parse_rate:.4f} "
+        f"| {summary.pass_at_k:.4f} | {summary.pass_at_k_lenient:.4f} "
+        f"| {summary.truncation_rate:.4f} "
         f"| {summary.mean_completion_tokens:.1f} | {summary.n_problems} "
         f"| {summary.timestamp} |\n"
     )

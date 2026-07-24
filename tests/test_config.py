@@ -96,10 +96,12 @@ def test_every_config_loads_without_error(path):
     load_config(path)  # must not raise (includes configs/stretch/)
 
 
-# eval.yaml is an eval-sweep parameter file, not a training run config -- it has
-# no run_name/model/train/rollout (see its own required-keys check below), so
-# the run-config required-keys check excludes it.
-_RUN_CONFIG_PATHS = sorted(p for p in CONFIGS_DIR.glob("*.yaml") if p.name != "eval.yaml")
+# eval.yaml and eval_milestone.yaml (inherit: eval.yaml) are eval-sweep
+# parameter files, not training run configs -- they have no
+# run_name/model/train/rollout (see their own required-keys checks below), so
+# the run-config required-keys check excludes them.
+_EVAL_CONFIG_NAMES = {"eval.yaml", "eval_milestone.yaml"}
+_RUN_CONFIG_PATHS = sorted(p for p in CONFIGS_DIR.glob("*.yaml") if p.name not in _EVAL_CONFIG_NAMES)
 
 
 @pytest.mark.parametrize("path", _RUN_CONFIG_PATHS, ids=lambda p: p.name)
@@ -123,6 +125,51 @@ def test_eval_config_has_its_own_required_keys():
     }
     missing = expected - cfg.keys()
     assert not missing, f"eval.yaml missing keys: {missing}"
+
+
+def test_eval_milestone_config_has_its_own_required_keys():
+    cfg = load_config(CONFIGS_DIR / "eval_milestone.yaml")
+    expected = {
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "kv_cache_dtype",
+        "k_default",
+        "k_final_aime",
+        "seed",
+        "benchmarks",
+    }
+    missing = expected - cfg.keys()
+    assert not missing, f"eval_milestone.yaml missing keys: {missing}"
+    assert cfg["benchmarks"] == ["gsm8k"]
+    assert cfg["k_default"] == 4
+
+
+def test_g2_main_resolves_lenient_extraction_and_difficulty_filter():
+    cfg = load_config(CONFIGS_DIR / "g2_main.yaml")
+    assert cfg["train"]["extraction_mode"] == "lenient"
+    assert cfg["train"]["format_bonus"] == 0.0
+    assert cfg["train"]["lr_schedule"] == "cosine"
+    assert cfg["train"]["kl_coef"] == 0.006
+    assert cfg["rollout"]["group_size"] == 8
+    assert cfg["data"]["difficulty_band"] == [0.125, 0.875]
+    assert cfg["data"]["difficulty_map"] == "results/difficulty/qwen2.5-0.5b_k8/map.jsonl"
+    # inherited from g1_robust -> g1_100 -> base
+    assert cfg["train"]["truncation_mode"] == "mask"
+    assert cfg["train"]["lr"] == 1.0e-6
+
+
+def test_g2_15b_reparents_onto_g2_main():
+    cfg = load_config(CONFIGS_DIR / "g2_15b.yaml")
+    assert cfg["model"]["name"] == "Qwen/Qwen2.5-1.5B-Instruct"
+    assert cfg["train"]["prompts_per_step"] == 32
+    assert cfg["train"]["ppo_mini_batch_size"] == 16
+    assert cfg["rollout"]["gpu_memory_utilization"] == 0.5
+    assert cfg["data"]["difficulty_map"] == "results/difficulty/qwen2.5-1.5b_k8/map.jsonl"
+    # inherited from g2_main, untouched
+    assert cfg["train"]["extraction_mode"] == "lenient"
+    assert cfg["data"]["difficulty_band"] == [0.125, 0.875]
+    assert cfg["rollout"]["group_size"] == 8
 
 
 def test_configs_dir_is_nonempty():

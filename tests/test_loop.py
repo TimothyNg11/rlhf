@@ -600,6 +600,173 @@ def test_resume_without_checkpoint_starts_fresh(tmp_path):
     assert (tmp_path / "config_resolved.yaml").exists()
 
 
+def test_extract_frac_keys_present_in_metrics(tmp_path):
+    trainer, _ = _make_trainer(tmp_path, _training_problems(), _answers_with_eval(_variance_answers()))
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    frac_keys = [
+        "extract_frac_boxed", "extract_frac_hash", "extract_frac_answer_is",
+        "extract_frac_last_number", "extract_frac_none",
+    ]
+    for key in frac_keys:
+        assert key in row
+    assert sum(row[k] for k in frac_keys) == pytest.approx(1.0)
+
+
+def test_extract_frac_boxed_only_in_default_boxed_mode(tmp_path):
+    # _variance_answers() is all \boxed{...} text -> boxed mode sees only
+    # "boxed"/"none" methods (per RewardResult.method's boxed-mode contract).
+    trainer, _ = _make_trainer(tmp_path, _training_problems(), _answers_with_eval(_variance_answers()))
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    assert row["extract_frac_boxed"] == pytest.approx(1.0)
+    assert row["extract_frac_hash"] == pytest.approx(0.0)
+    assert row["extract_frac_answer_is"] == pytest.approx(0.0)
+    assert row["extract_frac_last_number"] == pytest.approx(0.0)
+    assert row["extract_frac_none"] == pytest.approx(0.0)
+
+
+def test_extract_frac_reflects_lenient_methods(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["extraction_mode"] = "lenient"
+    cfg["train"]["format_bonus"] = 0.0
+    answers = {
+        "Q1": ["\\boxed{1}"],                    # boxed
+        "Q2": ["#### 2"],                        # hash
+        "Q3": ["The final answer is 3."],        # answer_is
+        "Q4": ["gibberish with 4 at the end"],   # last_number
+    }
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(answers), cfg=cfg
+    )
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    # group_size=2 -> each prompt contributes 2 identical-text completions.
+    assert row["extract_frac_boxed"] == pytest.approx(2 / 8)
+    assert row["extract_frac_hash"] == pytest.approx(2 / 8)
+    assert row["extract_frac_answer_is"] == pytest.approx(2 / 8)
+    assert row["extract_frac_last_number"] == pytest.approx(2 / 8)
+    assert row["extract_frac_none"] == pytest.approx(0.0)
+
+
+def test_lenient_extraction_mode_scores_unboxed_correct_answer(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["extraction_mode"] = "lenient"
+    cfg["train"]["format_bonus"] = 0.0
+    answers = {
+        "Q1": ["The final answer is 1."],
+        "Q2": ["The final answer is 2."],
+        "Q3": ["The final answer is 3."],
+        "Q4": ["The final answer is 4."],
+    }
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(answers), cfg=cfg
+    )
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    assert row["frac_correct"] == pytest.approx(1.0)  # unboxed-but-correct counts as correct
+
+
+def test_boxed_extraction_mode_does_not_score_unboxed_correct_answer(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["extraction_mode"] = "boxed"
+    answers = {
+        "Q1": ["The final answer is 1."],
+        "Q2": ["The final answer is 2."],
+        "Q3": ["The final answer is 3."],
+        "Q4": ["The final answer is 4."],
+    }
+    trainer, _ = _make_trainer(
+        tmp_path, _training_problems(), _answers_with_eval(answers), cfg=cfg
+    )
+    trainer.train()
+    row = _train_rows(tmp_path)[0]
+    assert row["frac_correct"] == pytest.approx(0.0)  # unboxed -> unparseable in boxed mode
+    assert row["parse_rate"] == pytest.approx(0.0)
+
+
+def test_invalid_extraction_mode_rejected(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["extraction_mode"] = "bogus"
+    with pytest.raises(AssertionError, match="extraction_mode"):
+        _make_trainer(tmp_path, _training_problems(),
+                      _answers_with_eval(_variance_answers()), cfg=cfg)
+
+
+def test_lenient_mode_with_nonzero_format_bonus_raises(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["extraction_mode"] = "lenient"
+    cfg["train"]["format_bonus"] = 0.2
+    with pytest.raises(ValueError, match="format_bonus"):
+        _make_trainer(tmp_path, _training_problems(),
+                      _answers_with_eval(_variance_answers()), cfg=cfg)
+
+
+def test_lenient_mode_with_zero_format_bonus_does_not_raise(tmp_path):
+    cfg = _make_cfg()
+    cfg["train"]["extraction_mode"] = "lenient"
+    cfg["train"]["format_bonus"] = 0.0
+    _make_trainer(tmp_path, _training_problems(),
+                  _answers_with_eval(_variance_answers()), cfg=cfg)  # must not raise
+
+
+# --- difficulty filter ---------------------------------------------------------
+
+
+def _write_difficulty_map(path, rows):
+    path.write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+
+
+def _difficulty_row(problem_id, n_correct_lenient, k=8):
+    return {
+        "problem_id": problem_id,
+        "split": "train",
+        "k": k,
+        "n_correct_lenient": n_correct_lenient,
+        "n_correct_strict": n_correct_lenient,
+        "n_truncated": 0,
+        "methods": {},
+    }
+
+
+def test_difficulty_filter_keeps_only_band(tmp_path):
+    cfg = _make_cfg()
+    map_path = tmp_path / "map.jsonl"
+    _write_difficulty_map(
+        map_path,
+        [
+            _difficulty_row("q1", 0),  # rate 0.0 -> excluded
+            _difficulty_row("q2", 4),  # rate 0.5 -> included
+            _difficulty_row("q3", 4),  # rate 0.5 -> included
+            _difficulty_row("q4", 8),  # rate 1.0 -> excluded
+        ],
+    )
+    cfg["data"]["difficulty_map"] = str(map_path)
+    cfg["data"]["difficulty_band"] = [0.125, 0.875]
+    trainer, _ = _make_trainer(
+        tmp_path / "run", _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+    )
+    assert [p.problem_id for p in trainer.problems] == ["q2", "q3"]
+
+
+def test_difficulty_filter_missing_id_raises(tmp_path):
+    cfg = _make_cfg()
+    map_path = tmp_path / "map.jsonl"
+    _write_difficulty_map(map_path, [_difficulty_row("q1", 4)])  # q2, q3, q4 missing
+    cfg["data"]["difficulty_map"] = str(map_path)
+    cfg["data"]["difficulty_band"] = [0.0, 1.0]
+    with pytest.raises(ValueError, match="q2"):
+        _make_trainer(
+            tmp_path / "run", _training_problems(), _answers_with_eval(_variance_answers()), cfg=cfg
+        )
+
+
+def test_no_difficulty_map_configured_keeps_all_problems(tmp_path):
+    # default cfg (no data.difficulty_map key) -> filter is a no-op.
+    trainer, _ = _make_trainer(tmp_path, _training_problems(), _answers_with_eval(_variance_answers()))
+    assert [p.problem_id for p in trainer.problems] == ["q1", "q2", "q3", "q4"]
+
+
 def test_resume_hf_format_without_override_raises(tmp_path):
     # A save_pretrained-format checkpoint (a model/ dir) plus resume=True but
     # no model_path_override must raise loudly rather than silently resuming

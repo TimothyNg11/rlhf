@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import math
 import time
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,6 +31,7 @@ import numpy as np
 import torch
 import yaml
 
+from grpo_math.data.difficulty import filter_by_band, load_difficulty_map
 from grpo_math.data.gsm8k import PromptSampler, load_gsm8k_train
 from grpo_math.eval.benchmarks import BENCHMARKS
 from grpo_math.eval.runner import run_eval
@@ -163,6 +165,24 @@ class GRPOTrainer:
         self.tis_cap = float(train_cfg.get("tis_cap", 2.0))
         # G2 stop-loss: abort once mean policy entropy blows past this (None = off).
         self.entropy_abort_threshold = train_cfg.get("entropy_abort_threshold")
+        # extraction_mode: "boxed" (default) matches the original \boxed{}-only
+        # grading; "lenient" also accepts a GSM8K-style "#### " line, an
+        # "answer is" phrase, or the last bare number (grpo_math.rewards.extraction).
+        # In lenient mode nearly every completion parses to SOME answer, so a
+        # nonzero format_bonus would hand out near-uniform reward regardless of
+        # correctness -- require format_bonus == 0.0 there instead of silently
+        # producing a degenerate reward signal.
+        self.extraction_mode = train_cfg.get("extraction_mode", "boxed")
+        assert self.extraction_mode in ("boxed", "lenient"), (
+            f"train.extraction_mode must be 'boxed' or 'lenient'; got {self.extraction_mode!r}"
+        )
+        if self.extraction_mode == "lenient" and train_cfg["format_bonus"] != 0.0:
+            raise ValueError(
+                "train.extraction_mode == 'lenient' requires train.format_bonus == 0.0 -- "
+                "in lenient mode nearly everything parses (boxed/hash/answer-is/last-number "
+                "all count), so a nonzero format_bonus would hand out near-uniform reward "
+                f"regardless of correctness. Got format_bonus={train_cfg['format_bonus']!r}."
+            )
         expected_holdout = BENCHMARKS["gsm8k_dev"].take_last
         assert cfg["data"]["dev_holdout"] == expected_holdout, (
             f"cfg data.dev_holdout ({cfg['data']['dev_holdout']}) must equal "
@@ -209,9 +229,21 @@ class GRPOTrainer:
         else:
             self.pad_token_id = 0
 
-        # --- problem set: load, length-filter, limit ------------------------
+        # --- problem set: load, difficulty-filter, length-filter, limit -----
         if problems is None:
             problems = load_gsm8k_train(dev_holdout=cfg["data"]["dev_holdout"])[0]
+
+        difficulty_map_path = cfg["data"].get("difficulty_map")
+        if difficulty_map_path is not None:
+            rates = load_difficulty_map(difficulty_map_path)
+            band = cfg["data"]["difficulty_band"]
+            n_before_difficulty = len(problems)
+            problems = filter_by_band(problems, rates, band)
+            print(
+                f"difficulty filter: kept {len(problems)}/{n_before_difficulty} "
+                f"problems in band {band}",
+                flush=True,
+            )
 
         self.n_prompts_filtered = 0
         if tokenizer is not None:
@@ -419,6 +451,7 @@ class GRPOTrainer:
             all_parseable: list[bool] = []
             all_truncated: list[bool] = []
             all_resp_len: list[int] = []
+            all_methods: list[str] = []
             masked_rows: list[list[bool]] = []  # per completion: excluded from training loss?
             for group_idx, group in enumerate(groups):
                 gold = golds[group_idx]
@@ -431,6 +464,7 @@ class GRPOTrainer:
                         truncated=(sample.finish_reason == "length"),
                         truncation_mode=self.truncation_mode,
                         format_bonus=train_cfg["format_bonus"],
+                        extraction_mode=self.extraction_mode,
                     )
                     row.append(result.reward)
                     masked_row.append(result.masked)
@@ -438,6 +472,7 @@ class GRPOTrainer:
                     all_parseable.append(result.parseable)
                     all_truncated.append(sample.finish_reason == "length")
                     all_resp_len.append(len(sample.response_token_ids))
+                    all_methods.append(result.method)
                 reward_rows.append(row)
                 masked_rows.append(masked_row)
 
@@ -447,6 +482,13 @@ class GRPOTrainer:
             frac_truncated = float(np.mean(all_truncated))
             response_len_mean = float(np.mean(all_resp_len))
             response_len_p90 = float(np.percentile(all_resp_len, 90))
+            method_counts = Counter(all_methods)
+            n_methods = len(all_methods)
+            extract_frac_boxed = method_counts.get("boxed", 0) / n_methods
+            extract_frac_hash = method_counts.get("hash", 0) / n_methods
+            extract_frac_answer_is = method_counts.get("answer_is", 0) / n_methods
+            extract_frac_last_number = method_counts.get("last_number", 0) / n_methods
+            extract_frac_none = method_counts.get("none", 0) / n_methods
 
             # 5. advantages (+ zero-variance groups per skip_zero_variance_groups)
             rewards_t = torch.tensor(reward_rows, dtype=torch.float32)
@@ -520,6 +562,11 @@ class GRPOTrainer:
                     "reward_mean": reward_mean,
                     "frac_correct": frac_correct,
                     "parse_rate": parse_rate,
+                    "extract_frac_boxed": extract_frac_boxed,
+                    "extract_frac_hash": extract_frac_hash,
+                    "extract_frac_answer_is": extract_frac_answer_is,
+                    "extract_frac_last_number": extract_frac_last_number,
+                    "extract_frac_none": extract_frac_none,
                     "frac_truncated": frac_truncated,
                     "response_len_mean": response_len_mean,
                     "response_len_p90": response_len_p90,

@@ -1,0 +1,12 @@
+inherit: g2_main.yaml
+run_name: g2_15b
+max_steps: 200
+model:
+  name: Qwen/Qwen2.5-1.5B-Instruct
+train:
+  prompts_per_step: 32         # compute-matched to budget at 1.5B
+  ppo_mini_batch_size: 16
+rollout:
+  gpu_memory_utilization: 0.5  # fp32 master + AdamW ~24GB at 1.5B
+data:
+  difficulty_map: results/difficulty/qwen2.5-1.5b_k8/map.jsonl

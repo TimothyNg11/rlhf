@@ -1,0 +1,3 @@
+inherit: eval.yaml
+benchmarks: [gsm8k]
+k_default: 4

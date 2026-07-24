@@ -1,0 +1,18 @@
+inherit: g1_robust.yaml
+run_name: g2_main
+max_steps: 300
+train:
+  lr_schedule: cosine          # headline_robust's late-run fix
+  min_lr_ratio: 0.1
+  kl_coef: 0.006               # G=8 is the unstable arm; cheap insurance
+  format_bonus: 0.0            # kill the format shortcut
+  extraction_mode: lenient     # reward = correctness however expressed
+  prompts_per_step: 48         # 48x8=384 compl/step: 1.5x compute but halves the
+                               # prompt concentration that drove the G=8 runaway
+  ppo_mini_batch_size: 24      # 2 updates/step
+  save_every: 50
+rollout:
+  group_size: 8
+data:
+  difficulty_map: results/difficulty/qwen2.5-0.5b_k8/map.jsonl
+  difficulty_band: [0.125, 0.875]
