@@ -7,6 +7,7 @@ from grpo_math.stats import (
     bootstrap_ci,
     paired_delta_ci,
     pass_at_1,
+    pass_at_k_any,
     per_problem_means,
 )
 
@@ -86,6 +87,31 @@ def test_paired_delta_ci_shape_mismatch_raises():
     b = np.array([0.1, 0.2])
     with pytest.raises(AssertionError):
         paired_delta_ci(a, b)
+
+
+def test_pass_at_k_any_all_fail():
+    results = np.zeros((4, 3))
+    assert pass_at_k_any(results) == pytest.approx(0.0)
+
+
+def test_pass_at_k_any_one_hit_per_problem_partial():
+    results = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    assert pass_at_k_any(results) == pytest.approx(2.0 / 3.0)
+
+
+def test_pass_at_k_any_all_correct():
+    results = np.ones((5, 4))
+    assert pass_at_k_any(results) == pytest.approx(1.0)
+
+
+def test_pass_at_k_any_k_equals_1_matches_pass_at_1():
+    results = np.array([[1.0], [0.0], [1.0]])
+    assert pass_at_k_any(results) == pytest.approx(pass_at_1(results))
+
+
+def test_pass_at_k_any_at_least_pass_at_1():
+    results = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]])
+    assert pass_at_k_any(results) >= pass_at_1(results)
 
 
 def test_bootstrap_ci_coverage_simulation():

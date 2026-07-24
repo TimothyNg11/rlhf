@@ -19,6 +19,14 @@ def per_problem_means(results: np.ndarray) -> np.ndarray:
     return np.mean(results, axis=1)
 
 
+def pass_at_k_any(results: np.ndarray) -> float:
+    """Mean over problems of "any of the k samples correct" -- the standard
+    pass@k estimator when exactly k samples are drawn per problem (no
+    Chen et al. combinatorial correction needed). ``results`` has shape
+    [n_problems, k]."""
+    return float(np.mean(np.any(results > 0, axis=1)))
+
+
 def bootstrap_ci(
     per_problem: np.ndarray,
     n_boot: int = 10_000,

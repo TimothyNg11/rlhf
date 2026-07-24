@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from grpo_math.rewards.extraction import extract_boxed
-from grpo_math.rewards.verify import compute_reward, verify_answer
+from grpo_math.rewards.verify import RewardResult, compute_reward, verify_answer
 
 GOLDEN_PATH = Path(__file__).parent / "golden" / "answers.jsonl"
 
@@ -151,3 +151,88 @@ def test_format_bonus_default_zero_backward_compat():
     assert result.reward == 0.0
     assert result.parseable is True
     assert result.masked is False
+
+
+# --- compute_reward: extraction_mode semantics ---
+
+
+def test_compute_reward_default_extraction_mode_is_boxed():
+    # Omitting extraction_mode preserves today's boxed-only behavior byte-for-byte:
+    # an unboxed-but-lenient-parseable completion is unparseable in this default mode.
+    result = compute_reward("The final answer is 42.", "42", truncated=False)
+    assert result.reward == 0.0
+    assert result.parseable is False
+    assert result.method == "none"
+
+
+def test_compute_reward_boxed_mode_explicit_matches_default():
+    result = compute_reward("The final answer is 42.", "42", truncated=False, extraction_mode="boxed")
+    assert result.reward == 0.0
+    assert result.parseable is False
+    assert result.method == "none"
+
+
+def test_compute_reward_boxed_mode_method_recorded_on_success():
+    result = compute_reward(r"\boxed{42}", "42", truncated=False, extraction_mode="boxed")
+    assert result.reward == 1.0
+    assert result.method == "boxed"
+
+
+def test_compute_reward_lenient_mode_unboxed_correct_completion():
+    result = compute_reward("The final answer is 42.", "42", truncated=False, extraction_mode="lenient")
+    assert result.reward == 1.0
+    assert result.parseable is True
+    assert result.masked is False
+    assert result.method == "answer_is"
+
+
+def test_compute_reward_lenient_mode_unparseable_completion():
+    result = compute_reward("no numeric answer here", "42", truncated=False, extraction_mode="lenient")
+    assert result.reward == 0.0
+    assert result.parseable is False
+    assert result.method == "none"
+
+
+def test_compute_reward_lenient_mode_boxed_completion_still_boxed_method():
+    # Boxed is stage 1 of the lenient chain too, so a boxed completion still
+    # reports method "boxed" (not "answer_is") under extraction_mode="lenient".
+    result = compute_reward(r"\boxed{42}", "42", truncated=False, extraction_mode="lenient")
+    assert result.reward == 1.0
+    assert result.method == "boxed"
+
+
+def test_compute_reward_lenient_mode_truncated_zero_reward_mode():
+    result = compute_reward(
+        "The final answer is 42.",
+        "42",
+        truncated=True,
+        truncation_mode="zero_reward",
+        extraction_mode="lenient",
+    )
+    assert result.reward == 0.0
+    assert result.masked is False
+    assert result.method == "answer_is"
+
+
+def test_compute_reward_lenient_mode_truncated_mask_mode():
+    result = compute_reward(
+        "The final answer is 42.",
+        "42",
+        truncated=True,
+        truncation_mode="mask",
+        extraction_mode="lenient",
+    )
+    assert result.reward == 0.0
+    assert result.masked is True
+    assert result.method == "answer_is"
+
+
+def test_compute_reward_unknown_extraction_mode_raises():
+    with pytest.raises(ValueError):
+        compute_reward(r"\boxed{42}", "42", truncated=False, extraction_mode="bogus")
+
+
+def test_reward_result_method_defaults_to_none_backward_compat():
+    # Existing callers that construct RewardResult without `method` still work.
+    result = RewardResult(reward=1.0, parseable=True, masked=False)
+    assert result.method == "none"
