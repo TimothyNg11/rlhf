@@ -55,6 +55,30 @@ def _write_samples(
                 f.write(json.dumps(record) + "\n")
 
 
+def test_load_per_problem_means_reads_regrade_filename(tmp_path):
+    # scripts/regrade_lenient.py writes `samples_regrade.jsonl.gz`, not
+    # `samples.jsonl.gz` -- paired_delta must read re-graded run dirs too
+    # (the flow for old runs: re-grade, then pair on the regrade output).
+    _write_samples(
+        tmp_path,
+        "gsm8k",
+        {"p1": [0.0, 0.0], "p2": [1.0, 0.0]},
+        lenient_verdicts_by_problem={"p1": [1.0, 0.0], "p2": [1.0, 0.0]},
+    )
+    bench_dir = tmp_path / "gsm8k"
+    (bench_dir / "samples.jsonl.gz").rename(bench_dir / "samples_regrade.jsonl.gz")
+
+    problem_ids, means, _ = load_per_problem_means(tmp_path, "gsm8k", metric="lenient")
+    assert problem_ids == ["p1", "p2"]
+    np.testing.assert_allclose(means, [0.5, 0.5])
+
+
+def test_load_per_problem_means_missing_both_files_names_candidates(tmp_path):
+    (tmp_path / "gsm8k").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="samples_regrade"):
+        load_per_problem_means(tmp_path, "gsm8k")
+
+
 def test_load_per_problem_means(tmp_path):
     _write_samples(
         tmp_path,

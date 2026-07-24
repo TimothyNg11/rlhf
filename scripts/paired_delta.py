@@ -51,7 +51,18 @@ def load_per_problem_means(
         raise ValueError(f"--agg must be one of {_VALID_AGGS}; got {agg!r}")
 
     verdict_key = "verdict" if metric == "strict" else "verdict_lenient"
-    samples_path = Path(root) / benchmark / "samples.jsonl.gz"
+    bench_dir = Path(root) / benchmark
+    # run_eval.py writes samples.jsonl.gz; regrade_lenient.py mirror dirs hold
+    # samples_regrade.jsonl.gz instead -- accept either so re-graded old runs
+    # can be paired directly.
+    samples_path = bench_dir / "samples.jsonl.gz"
+    if not samples_path.exists():
+        regrade_path = bench_dir / "samples_regrade.jsonl.gz"
+        if not regrade_path.exists():
+            raise FileNotFoundError(
+                f"neither samples.jsonl.gz nor samples_regrade.jsonl.gz found under {bench_dir}"
+            )
+        samples_path = regrade_path
     verdicts_by_problem: dict[str, list[float]] = defaultdict(list)
     n_rows = 0
     n_parseable = 0
