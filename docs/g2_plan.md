@@ -125,6 +125,27 @@ this and the Gate A checkpoints). Below the success bar → per the
 pre-registered tree, the phase pivots to Branch B (`configs/g2_15b.yaml`,
 Qwen2.5-1.5B-Instruct) with ~$59 of budget remaining.
 
+## fp8 KV-cache eval bug (2026-07-25) — affects all earlier absolute numbers
+
+Setting up the 1.5B branch exposed that `eval.yaml`'s `kv_cache_dtype: fp8`
+corrupts Qwen2.5 generation in vLLM 0.25.1: digit tokens are silently dropped
+("lay  eggs per day"), with degenerate 32k-token loops. On the 1.5B this
+collapsed GSM8K to ~2%; a bf16 sanity re-eval then showed the **0.5B was also
+corrupted all along**: base = **0.4585 strict / 0.4642 lenient, 97.3% boxing**
+under bf16, vs 0.316 / 0.373 / 80% boxing under fp8. Consequences:
+
+- All absolute test numbers measured before this date (G0, both sweeps, Gate A
+  re-grade, Gate B/C above) are fp8-deflated. The "base only boxes 80%" story
+  and much of the dev-vs-test contamination gap were artifacts.
+- Paired deltas compared same-config runs, so they measure real relative
+  improvement *under fp8-corrupted inference*; the clean-inference 0.5B delta
+  (base vs g2_main_b step-100, both k=8 bf16) is being re-measured.
+- Fix: `configs/eval_bf16.yaml`; every eval from here on uses bf16 KV, and
+  paired comparisons must match KV dtype on both sides. Erratum added to
+  `docs/ablation_and_sweep.md`.
+- 1.5B baseline (bf16, k=8): strict 0.7282 / lenient 0.7346 / pass@8 0.9227,
+  parse 98.8% — healthy, consistent with published numbers.
+
 ## Execution status
 
 - P0+P1 (measurement layer + trainer threading + configs) landed at commits

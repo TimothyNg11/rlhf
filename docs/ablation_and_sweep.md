@@ -1,5 +1,18 @@
 # Ablation study + final test-set sweep
 
+> **ERRATUM (2026-07-25):** every test-set eval in this document ran with
+> `eval.yaml`'s `kv_cache_dtype: fp8`, which was later shown to corrupt
+> Qwen2.5 generation (digit tokens dropped; see `docs/g2_plan.md`). Under
+> clean bf16 KV the base 0.5B scores **0.4585 strict pass@1 with 97.3% boxing**
+> (vs 0.316 / 80.0% reported below) — in line with Qwen's published ~49.6%.
+> Absolute levels below are therefore fp8-deflated, the parse-rate jump
+> (80%→99.6%) is largely an fp8 artifact, and much of the dev-vs-test gap
+> attributed to contamination was this bug. Paired deltas used the same
+> config on both sides, so they measure real *relative* improvement under
+> fp8-corrupted inference; clean-inference magnitudes are re-measured in the
+> G2 phase (`docs/g2_plan.md`). The training-side curves (dev evals, rewards)
+> never used fp8 and are unaffected.
+
 Qwen2.5-0.5B-Instruct, from-scratch GRPO on GSM8K, single H100. All ablation arms
 run at **100 steps** — the reliable stable horizon for this recipe (longer runs hit the
 entropy/length runaway diagnosed in `g1_diagnosis.md`). Stack: vLLM 0.25.1, torch 2.11,
