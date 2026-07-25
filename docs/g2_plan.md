@@ -219,6 +219,13 @@ Pre-registered BEFORE round-2 GPU spend:
   stands either way).
 - Confirmation on success only: independent lineage (seed-0 step_0100 parent,
   its own re-map, `--seed 1`; `configs/g2_round2_b.yaml`).
+- **Amendment (2026-07-25, before any round-2 GPU spend):** the pod restart
+  provisioned a fresh volume; seed-1's checkpoint existed only there and is
+  lost. Parent switched to **seed-0 step_0100** (hash-verified local copy,
+  re-uploaded). The primary incremental comparison is now vs seed-0's parent
+  eval (`results/sweep2/g2b_s0_step100_bf16`, pass@1_lenient 0.5041). The
+  confirmation arm downgrades to same-parent/different-RNG (`--seed 1`) —
+  guards run-to-run luck, not parent-checkpoint luck; noted as a limitation.
 - Predicted map shift (falsifiable): vs the base map (train mean 0.52, band
   kept 4,836) the trained-policy map should show the 8/8 mass swelling and the
   band shrinking. Pre-declared fallback: if band keeps < ~1,500 prompts, widen

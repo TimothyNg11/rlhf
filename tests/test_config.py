@@ -200,20 +200,20 @@ def test_g2_round2_changes_only_parent_model_and_map():
     parent = load_config(CONFIGS_DIR / "g2_main_b.yaml")
     assert cfg["run_name"] == "g2_round2"
     assert cfg["max_steps"] == 150
-    assert cfg["model"]["name"] == "results/train/g2_main_b-seed1/checkpoints/step_0100/model"
-    assert cfg["data"]["difficulty_map"] == "results/difficulty/g2b_s1_step100_k8/map.jsonl"
+    assert cfg["model"]["name"] == "results/train/g2_main_b-seed0/checkpoints/step_0100/model"
+    assert cfg["data"]["difficulty_map"] == "results/difficulty/g2b_s0_step100_k8/map.jsonl"
     # everything else identical to g2_main_b (single-variable round 2)
     assert cfg["train"] == parent["train"]
     assert cfg["rollout"] == parent["rollout"]
     assert cfg["data"]["difficulty_band"] == parent["data"]["difficulty_band"]
 
 
-def test_g2_round2_b_confirmation_arm_uses_seed0_lineage():
+def test_g2_round2_b_confirmation_arm_inherits_everything_but_name():
     cfg = load_config(CONFIGS_DIR / "g2_round2_b.yaml")
     base = load_config(CONFIGS_DIR / "g2_round2.yaml")
     assert cfg["run_name"] == "g2_round2_b"
-    assert cfg["model"]["name"] == "results/train/g2_main_b-seed0/checkpoints/step_0100/model"
-    assert cfg["data"]["difficulty_map"] == "results/difficulty/g2b_s0_step100_k8/map.jsonl"
+    assert cfg["model"] == base["model"]
+    assert cfg["data"] == base["data"]
     assert cfg["train"] == base["train"]
     assert cfg["max_steps"] == base["max_steps"]
 

@@ -7,8 +7,12 @@ run_name: g2_round2
 # re-maps solve rates from the trained policy and trains on the refreshed
 # learnable frontier. Fresh optimizer + fresh cosine over 150 (NOT --resume);
 # both round-1 seeds converged ~100 and entropy-aborted ~135-139.
+#
+# AMENDED 2026-07-25 before any round-2 GPU spend: parent switched from seed-1
+# to seed-0 step_0100 — the pod restart provisioned a fresh volume and seed-1's
+# checkpoint existed only there; seed-0's is hash-verified local (re-uploaded).
 max_steps: 150
 model:
-  name: results/train/g2_main_b-seed1/checkpoints/step_0100/model
+  name: results/train/g2_main_b-seed0/checkpoints/step_0100/model
 data:
-  difficulty_map: results/difficulty/g2b_s1_step100_k8/map.jsonl
+  difficulty_map: results/difficulty/g2b_s0_step100_k8/map.jsonl
