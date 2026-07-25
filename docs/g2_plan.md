@@ -98,6 +98,33 @@ g1_robust 0.2315 / g8 0.2150; MMLU-STEM base 0.2963 → g1_robust 0.3025 / g8
 ≈ strict for candidates), so the lenient metric's honesty gain is on the base
 side — exactly the confound the old analysis missed.
 
+## Gate B + Gate C results (2026-07-25, 0.5B branch)
+
+Training: `g2_main` (lr 1e-6) hit an entropy runaway at step 62 (0.45@51 →
+2.69@62; stop-loss abort — the G=8 + difficulty-band + lenient-reward stack
+concentrates more gradient per step than any prior recipe). Single-variable
+retry `g2_main_b` (lr 5e-7) doubled the stable horizon but aborted at step 135
+(entropy 2.14). Dev pass@1 0.576 → 0.647@100, plateau 0.646@125 — the model
+converges by ~step 100, then drifts. Best-dev checkpoint (pre-registered rule):
+step_0100.
+
+- **Gate B (first-500 test, k=4): PASS** — lenient Δpass@1 +2.60pp
+  [+0.20, +5.10] paired vs base.
+- **Gate C (full test 1319, k=8): FAIL on magnitude** — lenient Δpass@1
+  **+1.34pp [+0.25, +2.41]**: a real, parse-proof gain (CI > 0) but below the
+  pre-registered +3.0pp bar. Δpass@8 +1.59 [−0.61, +3.79] (no distribution-level
+  claim). Strict Δ +5.34 [+4.23, +6.45] — the strict−lenient gap is format, no
+  de-boxing signature. Transfer (candidate, k=4, lenient): MATH-500 0.222 (base
+  0.2175), MMLU-STEM 0.281 (base 0.2963) — no collapse, no transfer gain.
+- The first-500 milestone (+2.60) vs full-test (+1.34) gap is exactly the
+  slice-favorability the untouched-819 robustness row was designed to expose.
+
+**0.5B branch conclusion:** at its ~100-step stable horizon, GRPO gives the
+0.5B a consistently real but small parse-proof gain (+1.3 to +2.5pp across
+this and the Gate A checkpoints). Below the success bar → per the
+pre-registered tree, the phase pivots to Branch B (`configs/g2_15b.yaml`,
+Qwen2.5-1.5B-Instruct) with ~$59 of budget remaining.
+
 ## Execution status
 
 - P0+P1 (measurement layer + trainer threading + configs) landed at commits
