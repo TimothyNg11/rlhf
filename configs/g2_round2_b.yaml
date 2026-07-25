@@ -1,0 +1,9 @@
+inherit: g2_round2.yaml
+run_name: g2_round2_b
+# Confirmation arm (run only if g2_round2 shows incremental lenient delta CI>0
+# and >= +1.0pp): independent lineage — parent = round-1 SEED-0's step_0100,
+# with its OWN re-map (solve rates are model-specific), launched with --seed 1.
+model:
+  name: results/train/g2_main_b-seed0/checkpoints/step_0100/model
+data:
+  difficulty_map: results/difficulty/g2b_s0_step100_k8/map.jsonl

@@ -1,0 +1,14 @@
+inherit: g2_main_b.yaml
+run_name: g2_round2
+# G2.1 iterated re-mapping: same recipe as round 1, changing ONLY which model
+# we start from and which difficulty map filters the data. Round-1 training
+# mastered much of the base-model band -> all-correct zero-advantage groups ->
+# dev plateau by ~step 100 (gradient starvation, docs/g2_plan.md). Round 2
+# re-maps solve rates from the trained policy and trains on the refreshed
+# learnable frontier. Fresh optimizer + fresh cosine over 150 (NOT --resume);
+# both round-1 seeds converged ~100 and entropy-aborted ~135-139.
+max_steps: 150
+model:
+  name: results/train/g2_main_b-seed1/checkpoints/step_0100/model
+data:
+  difficulty_map: results/difficulty/g2b_s1_step100_k8/map.jsonl

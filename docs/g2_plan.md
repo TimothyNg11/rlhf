@@ -197,6 +197,34 @@ Spend: ~$26 of the $70 cap (incl. all detours). Remaining budget untouched;
 optional extensions (1.5B arm — baseline + map already banked; transfer sweep
 for seed-1; 400-step probe) are user's call.
 
+## G2.1 pre-registration: iterated difficulty re-mapping (round 2)
+
+Hypothesis under test: the round-1 dev plateau at ~step 100 was **gradient
+starvation** — the band was computed from the *base* model's solve rates, and
+mastered prompts yield all-correct zero-advantage groups. Round 2 re-maps
+difficulty from the trained policy (`g2_main_b` seed-1 step_0100, the 51.1%
+model), rebuilds the band, and trains a second round from that checkpoint
+(`configs/g2_round2.yaml` — same recipe, fresh optimizer/cosine over 150 steps;
+only the parent model and the map change).
+
+Pre-registered BEFORE round-2 GPU spend:
+
+- **Primary (incremental):** paired lenient Δpass@1, round-2 best-dev
+  checkpoint vs its parent (seed-1 step_0100), full GSM8K test, k=8,
+  `eval_bf16.yaml`. **Success = CI excludes 0 AND Δ ≥ +1.0pp.**
+- Secondary: cumulative Δ vs base; Δpass@8 class; strict-vs-lenient check.
+- Checkpoint selection: unchanged best-dev rule.
+- Interpretation: success → gradient-starvation supported; null → the plateau
+  is a sharpening ceiling at 0.5B, reported as a finding (round-1 result
+  stands either way).
+- Confirmation on success only: independent lineage (seed-0 step_0100 parent,
+  its own re-map, `--seed 1`; `configs/g2_round2_b.yaml`).
+- Predicted map shift (falsifiable): vs the base map (train mean 0.52, band
+  kept 4,836) the trained-policy map should show the 8/8 mass swelling and the
+  band shrinking. Pre-declared fallback: if band keeps < ~1,500 prompts, widen
+  to [0, 7/8] via config.
+- Budget: ~$12 base path, ~$22 with confirmation, from the ~$44 remaining.
+
 ## Execution status
 
 - P0+P1 (measurement layer + trainer threading + configs) landed at commits
