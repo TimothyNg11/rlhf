@@ -1,0 +1,10 @@
+inherit: g2_round2.yaml
+run_name: g2_round2_lr25
+# Round-2 retry after g2_round2 entropy-aborted at step 27 (0.386 at load ->
+# 2.297@27): the parent checkpoint carries round-1's late-run entropy level, so
+# the stop-loss margin is thin from step 1, and the refreshed (harder) band
+# re-ignites the runaway under lr 5e-7. Same twice-proven single-variable fix
+# as g1_robust and g2_main_b: halve the lr. Dev was RISING pre-abort
+# (0.642 -> 0.662 in 25 steps), so the band is teachable at lower pressure.
+train:
+  lr: 2.5e-7

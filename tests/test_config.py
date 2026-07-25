@@ -218,6 +218,18 @@ def test_g2_round2_b_confirmation_arm_inherits_everything_but_name():
     assert cfg["max_steps"] == base["max_steps"]
 
 
+def test_g2_round2_lr25_changes_only_lr():
+    cfg = load_config(CONFIGS_DIR / "g2_round2_lr25.yaml")
+    base = load_config(CONFIGS_DIR / "g2_round2.yaml")
+    assert cfg["train"]["lr"] == 2.5e-7
+    assert cfg["run_name"] == "g2_round2_lr25"
+    assert cfg["model"] == base["model"]
+    assert cfg["data"] == base["data"]
+    assert {k: v for k, v in cfg["train"].items() if k != "lr"} == {
+        k: v for k, v in base["train"].items() if k != "lr"
+    }
+
+
 def test_configs_dir_is_nonempty():
     assert list(CONFIGS_DIR.glob("*.yaml"))
 
