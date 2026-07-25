@@ -1,0 +1,10 @@
+inherit: g2_main.yaml
+run_name: g2_main_b
+# Retry of g2_main after its entropy runaway (0.45@51 -> 2.69@62, stop-loss
+# abort at step 62). The G2 levers stack more gradient per step than any prior
+# run (G=8 + difficulty band centered near 50% solve rate + lenient reward),
+# so the g1_robust lr is no longer conservative enough. Single-variable fix,
+# same medicine that converted the original blowup@55 into a stable 100-step
+# run (docs/g1_diagnosis.md): halve the lr again. Cosine still decays to 0.1x.
+train:
+  lr: 5.0e-7

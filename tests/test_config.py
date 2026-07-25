@@ -172,6 +172,19 @@ def test_g2_15b_reparents_onto_g2_main():
     assert cfg["rollout"]["group_size"] == 8
 
 
+def test_g2_main_b_changes_only_lr():
+    cfg = load_config(CONFIGS_DIR / "g2_main_b.yaml")
+    base = load_config(CONFIGS_DIR / "g2_main.yaml")
+    assert cfg["train"]["lr"] == 5.0e-7
+    assert cfg["run_name"] == "g2_main_b"
+    # everything else identical to g2_main (single-variable retry)
+    for section in ("train", "rollout", "data"):
+        for key, value in base[section].items():
+            if section == "train" and key == "lr":
+                continue
+            assert cfg[section][key] == value, (section, key)
+
+
 def test_configs_dir_is_nonempty():
     assert list(CONFIGS_DIR.glob("*.yaml"))
 
