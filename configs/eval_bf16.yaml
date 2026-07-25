@@ -1,0 +1,7 @@
+inherit: eval.yaml
+# fp8 KV cache corrupts Qwen2.5-1.5B-Instruct generation (digit tokens dropped
+# from completions -- "lay  eggs per day" -- collapsing GSM8K to ~2% and causing
+# degenerate 32k-token loops; observed 2026-07-25 on H100, vLLM 0.25.1). The
+# 0.5B tolerated fp8. All 1.5B evals use this config; base-vs-candidate paired
+# comparisons must use the SAME kv dtype on both sides.
+kv_cache_dtype: auto

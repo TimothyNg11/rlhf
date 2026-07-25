@@ -100,7 +100,7 @@ def test_every_config_loads_without_error(path):
 # parameter files, not training run configs -- they have no
 # run_name/model/train/rollout (see their own required-keys checks below), so
 # the run-config required-keys check excludes them.
-_EVAL_CONFIG_NAMES = {"eval.yaml", "eval_milestone.yaml"}
+_EVAL_CONFIG_NAMES = {"eval.yaml", "eval_milestone.yaml", "eval_bf16.yaml"}
 _RUN_CONFIG_PATHS = sorted(p for p in CONFIGS_DIR.glob("*.yaml") if p.name not in _EVAL_CONFIG_NAMES)
 
 
@@ -170,6 +170,16 @@ def test_g2_15b_reparents_onto_g2_main():
     assert cfg["train"]["extraction_mode"] == "lenient"
     assert cfg["data"]["difficulty_band"] == [0.125, 0.875]
     assert cfg["rollout"]["group_size"] == 8
+
+
+def test_eval_bf16_overrides_only_kv_dtype():
+    cfg = load_config(CONFIGS_DIR / "eval_bf16.yaml")
+    base = load_config(CONFIGS_DIR / "eval.yaml")
+    assert cfg["kv_cache_dtype"] == "auto"
+    for key, value in base.items():
+        if key == "kv_cache_dtype":
+            continue
+        assert cfg[key] == value, key
 
 
 def test_g2_main_b_changes_only_lr():
