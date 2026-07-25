@@ -171,6 +171,32 @@ Decision per the pre-registered tree: Gate C pass → **seed-1 confirmation run*
 longer required; its baseline + difficulty map (~$7) remain available if the
 user wants a second-model result later.
 
+## Final verdict (2026-07-25): SUCCESS, seed-replicated
+
+Seed-1 repeat (`g2_main_b --seed 1`, identical protocol: entropy abort @139 vs
+seed-0's @135, dev plateau by ~step 100, best-dev checkpoint = step_0100):
+
+| seed | lenient Δpass@1 (full test, k=8, bf16, paired) | strict Δ | Δpass@8 |
+|---|---|---|---|
+| 0 | +3.70 [+2.67, +4.73] | +4.28 | +0.99 [−0.91, +2.88] |
+| 1 | **+4.40 [+3.37, +5.40]** | +4.98 | +0.00 [−1.90, +1.90] |
+
+**The pre-registered success condition holds in both independent seeds** (seed-1's
+CI lower bound alone clears the +3.0 bar). Character: consistent "sharpening" —
+pass@1 up ~4pp, pass@8 flat — the policy reliably lands answers it previously
+only sometimes sampled. Base 0.4671 → candidates 0.5041 / 0.5111.
+
+What produced the genuine gain vs the last phase's format-only result: lenient
+reward (format shortcut removed), difficulty-band training data (nearly every
+group carries gradient), G=8, lr 5e-7 — at a reproducible ~135-step stable
+horizon with convergence by ~100. Secondary finding with independent value: the
+fp8-KV eval bug that had deflated every absolute number in the project and
+manufactured the "base can't format" narrative.
+
+Spend: ~$26 of the $70 cap (incl. all detours). Remaining budget untouched;
+optional extensions (1.5B arm — baseline + map already banked; transfer sweep
+for seed-1; 400-step probe) are user's call.
+
 ## Execution status
 
 - P0+P1 (measurement layer + trainer threading + configs) landed at commits
