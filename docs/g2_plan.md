@@ -146,6 +146,31 @@ under bf16, vs 0.316 / 0.373 / 80% boxing under fp8. Consequences:
 - 1.5B baseline (bf16, k=8): strict 0.7282 / lenient 0.7346 / pass@8 0.9227,
   parse 98.8% — healthy, consistent with published numbers.
 
+## Clean-inference Gate C (2026-07-25): **PASS**
+
+Re-measuring the pre-registered quantity under bf16 KV (full GSM8K test, k=8,
+paired, same config both sides):
+
+| metric | base | g2_main_b step-100 | Δ [95% CI] |
+|---|---|---|---|
+| **lenient pass@1 (primary)** | 0.4671 | **0.5041** | **+3.70 [+2.67, +4.73]** |
+| lenient pass@8 (secondary) | 0.7832 | 0.7930 | +0.99 [−0.91, +2.88] |
+| strict pass@1 (cross-check) | 0.4611 | 0.5039 | +4.28 [+3.25, +5.34] |
+| lenient pass@1, untouched last-819 | — | — | +3.72 [+2.44, +5.02] |
+
+- **Success bar met**: Δ ≥ +3.0pp AND CI excludes 0. The fp8-corrupted eval had
+  been *understating* the gain (+1.34 under fp8).
+- Pre-registered classification: **"sharpening"** (pass@1 up, pass@8 flat) — the
+  policy reliably lands answers it could previously only sometimes sample, and
+  crosses 50% on GSM8K test.
+- No reward-hacking signature (strict ≈ lenient; boxing high on both sides).
+- The gain reproduces on the 819 test problems no gate ever examined.
+
+Decision per the pre-registered tree: Gate C pass → **seed-1 confirmation run**
+(g2_main_b --seed 1, same kill/selection/eval protocol). The 1.5B branch is no
+longer required; its baseline + difficulty map (~$7) remain available if the
+user wants a second-model result later.
+
 ## Execution status
 
 - P0+P1 (measurement layer + trainer threading + configs) landed at commits
