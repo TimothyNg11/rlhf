@@ -232,6 +232,43 @@ Pre-registered BEFORE round-2 GPU spend:
   to [0, 7/8] via config.
 - Budget: ~$12 base path, ~$22 with confirmation, from the ~$44 remaining.
 
+## G2.1 results (2026-07-25): incremental success, replicated
+
+**Map shift (hypothesis read-out):** trained-policy map vs base map — train mean
+solve 0.520 → 0.585, mastered (8/8) 1,180 → 1,754, hopeless (0/8) 1,118 → 916
+(202 problems newly in reach), band [1/8, 7/8] 5,175 → 4,803 (−7%). Gradient
+starvation is real but partial: the cheapest gradient dried up; the band stayed
+populated. Band kept at [1/8, 7/8].
+
+**Training:** the parent checkpoint loads at entropy ~0.39 (round-1's late-run
+state), so the stop-loss margin is thin from step 1. `g2_round2` (lr 5e-7)
+aborted at step 27 with dev already rising (0.642 → 0.662@25). Single-variable
+retry `g2_round2_lr25` (lr 2.5e-7) reached step 71 / 65 (seed 0 / 1); dev bumps
+~+2pp by step 25 then plateaus (~0.66 / 0.65); candidates = step_0050 both.
+
+**Verdicts (full test, k=8, bf16, paired):**
+
+| run | incremental vs parent (0.5041) | cumulative vs base (0.4671) |
+|---|---|---|
+| lr25 seed-0 step-50 | **+1.77 [+0.88, +2.63]** | **+5.47 [+4.40, +6.54]** → 0.5218 |
+| lr25 seed-1 step-50 (confirm) | **+1.15 [+0.30, +2.00]** | +4.84 [+3.77, +5.92] → 0.5155 |
+
+Pre-registered bar (CI > 0 AND ≥ +1.0pp) met in BOTH runs. Strict incremental
++1.78 ≈ lenient (no extraction gaming). Incremental Δpass@8 −0.53 [−2.27,
++1.21]: still sharpening. Confirmation is same-parent/different-RNG (the
+seed-1-lineage arm died with the pod volume — see amendment).
+
+**Takeaways:** (1) iterated difficulty re-mapping extends sharpening past the
+single-round plateau — two rounds total +5.5pp (46.7% → 52.2%), each round's
+gain individually significant; (2) rounds get shorter and hotter — the parent's
+entropy level compounds, each round needs a lower lr (5e-7 → 2.5e-7) and aborts
+sooner (135 → 71); a third round would likely need lr ~1e-7 for a diminishing
+return; (3) pass@8 never moved — all gains are reliability, bounded by the base
+distribution's 78% pass@8 ceiling.
+
+Spend: round 2 ≈ $14 (maps, four runs incl. the step-27 abort, three k=8
+evals); project total ≈ $40 of $70.
+
 ## Execution status
 
 - P0+P1 (measurement layer + trainer threading + configs) landed at commits
