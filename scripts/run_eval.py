@@ -2,12 +2,13 @@
 """CLI entry point for running the eval harness against one or more benchmarks.
 
 Fake-backend smoke test (no GPU, no network):
-    python scripts/run_eval.py --config configs/eval.yaml --benchmark aime24 \\
+    python scripts/run_eval.py --config configs/eval_bf16.yaml --benchmark gsm8k \\
         --model dummy --backend fake --fake-script script.json --limit 3
 
-Real run on the GPU box (see report/task-2-report.md "G0 runbook"):
-    python scripts/run_eval.py --config configs/eval.yaml --benchmark all \\
-        --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --backend vllm --final
+Real run on the GPU box (use eval_bf16.yaml -- fp8 KV corrupts Qwen2.5
+generation, see docs/g2_results.md):
+    python scripts/run_eval.py --config configs/eval_bf16.yaml --benchmark gsm8k \\
+        --model Qwen/Qwen2.5-0.5B-Instruct --backend vllm --k 8
 """
 
 from __future__ import annotations
